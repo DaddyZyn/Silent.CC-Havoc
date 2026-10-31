@@ -1,191 +1,70 @@
 --!strict
 --[[
-    silent.cc - Havoc [Season 2] Entry Point
-    Engineered for tactical combat and ballistics management in Havoc.
+    silent.cc - Havoc [Season 2] Controller
+    Modular entry point requiring src/ui/library.luau
 ]]
 
 local Library = require(script.Parent.ui.library)
 
--- Master State Cache
-local Config = {
-    Combat = {
-        SilentAim = false,
-        TargetPart = "Head",
-        FOVRadius = 120,
-        PredictionMultiplier = 1.15,
-        WallCheck = true,
-        HitChance = 100,
-        RecoilComp = 100,
-        SpreadReduction = true,
-        AutoShoot = false,
-    },
-    Visuals = {
-        BoxESP = true,
-        HealthBar = true,
-        NameTag = true,
-        DistanceTag = true,
-        Tracers = false,
-        TracerOrigin = "Bottom",
-        Chams = false,
-        WeaponESP = false,
-    },
-    Misc = {
-        SpeedMultiplier = 16,
-        FastReload = false,
-        InfiniteStamina = false,
-        UnlockFiremode = false,
-    }
-}
-
--- Initialize Havoc Obsidian Window
 local Window = Library.CreateWindow({
-    Title = "SILENT.CC",
-    SubTitle = "HAVOC [S2]",
-    Size = Vector2.new(680, 480),
+    Title = "silent.cc",
+    Game = "Havoc",
+    Link = "discord.gg/silentcc",
+    Size = Vector2.new(680, 720),
     ToggleKey = Enum.KeyCode.RightShift,
 })
 
--- =========================================================================
--- TAB 1: COMBAT
--- =========================================================================
-local CombatTab = Window:CreateTab("Combat")
+local MainTab = Window:CreateTab("Main")
+local AimbotGroup = MainTab:CreateGroupbox("Aimbot", "Left")
+AimbotGroup:AddToggle("Enabled", false, { Keybind = Enum.KeyCode.E })
+AimbotGroup:AddDropdown("Aim mode", { "Camera", "Mouse" }, "Camera")
+AimbotGroup:AddDropdown("Aim part", { "Head", "Torso", "HumanoidRootPart" }, "Head")
+AimbotGroup:AddSlider("Circle Size", 50, 500, 150)
+AimbotGroup:AddSlider("Smoothing", 1, 100, 30)
+AimbotGroup:AddSlider("Mouse Sensitivity", 10, 400, 100, "%")
+AimbotGroup:AddToggle("Prediction", false)
+AimbotGroup:AddSlider("Prediction X", 0, 50, 17, "%")
+AimbotGroup:AddSlider("Prediction Y", 0, 50, 2, "%")
+AimbotGroup:AddToggle("Sticky Aim", false)
+AimbotGroup:AddSlider("Sticky Range", 100, 1000, 400)
+AimbotGroup:AddToggle("Show Circle", false)
+AimbotGroup:AddColorPicker("Circle Colour", Color3.fromRGB(0, 110, 255))
+AimbotGroup:AddSlider("Circle Y Offset", 0, 60, 0)
 
--- Combat Column 1: Silent Aim Core
-local AimGroup = CombatTab:CreateGroupbox("Targeting Engine", "Left")
+local SilentGroup = MainTab:CreateGroupbox("Silent Aim", "Right")
+SilentGroup:AddToggle("Enabled", false, { Keybind = Enum.KeyCode.Q })
+SilentGroup:AddSlider("Circle Size", 50, 600, 300)
+SilentGroup:AddDropdown("Hit limb", { "HumanoidRootPart", "Head", "Torso" }, "HumanoidRootPart")
+SilentGroup:AddSlider("Hit Rate", 10, 100, 100, "%")
+SilentGroup:AddToggle("Sticky Aim", false)
+SilentGroup:AddSlider("Sticky Range", 100, 1000, 400)
+SilentGroup:AddToggle("Show Circle", false)
+SilentGroup:AddColorPicker("Circle Colour", Color3.fromRGB(0, 255, 170))
+SilentGroup:AddSlider("Circle Y Offset", 0, 60, 0)
 
-AimGroup:AddToggle("Enable Silent Aim", Config.Combat.SilentAim, function(val)
-    Config.Combat.SilentAim = val
-    Window:SetFooterStatus(val and "AIM ENGINE: ARMED" or "AIM ENGINE: STANDBY")
-end)
+local EspTab = Window:CreateTab("Esp")
+local PlayerEspGroup = EspTab:CreateGroupbox("Player ESP", "Left")
+PlayerEspGroup:AddToggle("Enabled", false)
+PlayerEspGroup:AddToggle("Box ESP", false)
+PlayerEspGroup:AddToggle("Health Bar", false)
+PlayerEspGroup:AddToggle("Name Tags", false)
+PlayerEspGroup:AddToggle("Distance Tags", false)
+PlayerEspGroup:AddToggle("Snapline Tracers", false)
 
-AimGroup:AddDropdown("Target Bone", { "Head", "UpperTorso", "HumanoidRootPart", "Randomize" }, Config.Combat.TargetPart, function(part)
-    Config.Combat.TargetPart = part
-end)
-
-AimGroup:AddSlider("FOV Radius", 30, 450, Config.Combat.FOVRadius, "px", function(val)
-    Config.Combat.FOVRadius = val
-end)
-
-AimGroup:AddSlider("Lead Velocity Scale", 0, 300, 115, "%", function(val)
-    Config.Combat.PredictionMultiplier = val / 100
-end)
-
-AimGroup:AddToggle("Visible Check Only", Config.Combat.WallCheck, function(val)
-    Config.Combat.WallCheck = val
-end)
-
--- Combat Column 2: Accuracy & Ballistics
-local BallisticsGroup = CombatTab:CreateGroupbox("Ballistics Control", "Right")
-
-BallisticsGroup:AddSlider("Hitchance", 10, 100, Config.Combat.HitChance, "%", function(val)
-    Config.Combat.HitChance = val
-end)
-
-BallisticsGroup:AddSlider("Recoil Neutralizer", 0, 100, Config.Combat.RecoilComp, "%", function(val)
-    Config.Combat.RecoilComp = val
-end)
-
-BallisticsGroup:AddToggle("Spread Nullification", Config.Combat.SpreadReduction, function(val)
-    Config.Combat.SpreadReduction = val
-end)
-
-BallisticsGroup:AddToggle("Auto Fire Trigger", Config.Combat.AutoShoot, function(val)
-    Config.Combat.AutoShoot = val
-end)
-
--- =========================================================================
--- TAB 2: VISUALS
--- =========================================================================
 local VisualsTab = Window:CreateTab("Visuals")
+local ChamsGroup = VisualsTab:CreateGroupbox("Chams & Highlights", "Left")
+ChamsGroup:AddToggle("Enable Chams", false)
+ChamsGroup:AddColorPicker("Visible Color", Color3.fromRGB(120, 87, 255))
+ChamsGroup:AddColorPicker("Hidden Color", Color3.fromRGB(255, 60, 60))
 
--- Visuals Column 1: Player ESP
-local EspGroup = VisualsTab:CreateGroupbox("Player ESP", "Left")
+local CharTab = Window:CreateTab("Character")
+local MovementGroup = CharTab:CreateGroupbox("Movement", "Left")
+MovementGroup:AddToggle("WalkSpeed Override", false)
+MovementGroup:AddSlider("Speed Value", 16, 100, 24, " studs")
 
-EspGroup:AddToggle("Bounding 2D Box", Config.Visuals.BoxESP, function(val)
-    Config.Visuals.BoxESP = val
-end)
+local SettingsTab = Window:CreateTab("settings")
+local ProfileGroup = SettingsTab:CreateGroupbox("Profile Manager", "Left")
+ProfileGroup:AddButton("Save Default Config", function() end)
+ProfileGroup:AddButton("Load Default Config", function() end)
 
-EspGroup:AddToggle("Health Bar Indicator", Config.Visuals.HealthBar, function(val)
-    Config.Visuals.HealthBar = val
-end)
-
-EspGroup:AddToggle("Player Tags (Name)", Config.Visuals.NameTag, function(val)
-    Config.Visuals.NameTag = val
-end)
-
-EspGroup:AddToggle("Distance Readout", Config.Visuals.DistanceTag, function(val)
-    Config.Visuals.DistanceTag = val
-end)
-
-EspGroup:AddToggle("Snapline Tracers", Config.Visuals.Tracers, function(val)
-    Config.Visuals.Tracers = val
-end)
-
-EspGroup:AddDropdown("Tracer Origin", { "Bottom", "Center", "Cursor" }, Config.Visuals.TracerOrigin, function(origin)
-    Config.Visuals.TracerOrigin = origin
-end)
-
--- Visuals Column 2: World & Models
-local WorldGroup = VisualsTab:CreateGroupbox("World & Chams", "Right")
-
-WorldGroup:AddToggle("Wall Chams (Highlight)", Config.Visuals.Chams, function(val)
-    Config.Visuals.Chams = val
-end)
-
-WorldGroup:AddToggle("Dropped Weapons ESP", Config.Visuals.WeaponESP, function(val)
-    Config.Visuals.WeaponESP = val
-end)
-
--- =========================================================================
--- TAB 3: MISC
--- =========================================================================
-local MiscTab = Window:CreateTab("Misc")
-
-local PlayerModsGroup = MiscTab:CreateGroupbox("Player Physics", "Left")
-
-PlayerModsGroup:AddSlider("WalkSpeed Override", 16, 50, Config.Misc.SpeedMultiplier, " studs", function(val)
-    Config.Misc.SpeedMultiplier = val
-end)
-
-PlayerModsGroup:AddToggle("Infinite Stamina", Config.Misc.InfiniteStamina, function(val)
-    Config.Misc.InfiniteStamina = val
-end)
-
-local GunModsGroup = MiscTab:CreateGroupbox("Weapon Handling", "Right")
-
-GunModsGroup:AddToggle("Instant Tactical Reload", Config.Misc.FastReload, function(val)
-    Config.Misc.FastReload = val
-end)
-
-GunModsGroup:AddToggle("Unlock Full-Auto Firemode", Config.Misc.UnlockFiremode, function(val)
-    Config.Misc.UnlockFiremode = val
-end)
-
--- =========================================================================
--- TAB 4: SETTINGS / CONFIGS
--- =========================================================================
-local SettingsTab = Window:CreateTab("Settings")
-
-local ConfigGroup = SettingsTab:CreateGroupbox("Profile Manager", "Left")
-
-ConfigGroup:AddButton("Save Default Config", function()
-    Window:SetFooterStatus("CONFIG: DEFAULT PROFILE SAVED")
-end)
-
-ConfigGroup:AddButton("Load Default Config", function()
-    Window:SetFooterStatus("CONFIG: DEFAULT PROFILE LOADED")
-end)
-
-local SystemGroup = SettingsTab:CreateGroupbox("System / Unload", "Right")
-
-SystemGroup:AddButton("Unload silent.cc", function()
-    Window:SetFooterStatus("STATUS: UNLOADED")
-    Window.ScreenGui:Destroy()
-end)
-
-Window:SetFooterStatus("INITIALIZED // READY FOR HAVOC")
-
-return {
-    Window = Window,
-    Config = Config,
-}
+return Window
