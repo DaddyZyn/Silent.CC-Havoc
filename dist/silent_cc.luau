@@ -1644,7 +1644,7 @@ MovementGroup:AddToggle("WalkSpeed Override", Config.Character.SpeedOverride, {
         end
     end
 })
-MovementGroup:AddSlider("Speed Value", 16, 25, Config.Character.SpeedValue, " studs", function(val)
+MovementGroup:AddSlider("Safe Speed (Cap: 20.4)", 14, 21, Config.Character.SpeedValue, " studs", function(val)
     Config.Character.SpeedValue = val
 end)
 MovementGroup:AddToggle("No Action Slowdown (ADS/Heal)", Config.Character.NoSlowdown, { Callback = function(v) Config.Character.NoSlowdown = v end })
@@ -1652,12 +1652,18 @@ MovementGroup:AddToggle("Infinite Stamina", Config.Character.InfiniteStamina, { 
 MovementGroup:AddToggle("Directional Fly", Config.Character.Fly, {
     Callback = function(v)
         Config.Character.Fly = v
+        if not v and LocalPlayer and LocalPlayer.Character then
+            local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                hrp.AssemblyLinearVelocity = Vector3.new(hrp.AssemblyLinearVelocity.X, 0, hrp.AssemblyLinearVelocity.Z)
+            end
+        end
     end
 })
 MovementGroup:AddDropdown("Flight Mode", { "Hover Glide (Anti-Snapback)", "Wave Hop (Wall Climber)", "Uncapped Free Flight" }, Config.Character.FlightMode, function(v)
     Config.Character.FlightMode = v
 end)
-MovementGroup:AddSlider("Fly Speed", 5, 35, Config.Character.FlySpeed, " studs", function(v)
+MovementGroup:AddSlider("Fly Speed", 5, 21, Config.Character.FlySpeed, " studs", function(v)
     Config.Character.FlySpeed = v
 end)
 MovementGroup:AddToggle("Bunny Hop", Config.Character.BunnyHop, { Callback = function(v) Config.Character.BunnyHop = v end })
@@ -2116,124 +2122,11 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- 5. WalkSpeed & Tactical No-Slowdown Override
-    if LocalPlayer and LocalPlayer.Character then
-        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if hum then
-            if Config.Character.SpeedOverride then
-                if hum.WalkSpeed ~= Config.Character.SpeedValue then
-                    hum.WalkSpeed = Config.Character.SpeedValue
-                end
-            elseif Config.Character.InfiniteStamina or Config.Character.NoSlowdown then
-                -- Lock minimum speed at 18 so ADS, healing, reloading, or 0 stamina never slow you down
-                if hum.WalkSpeed < 18 then
-                    hum.WalkSpeed = 18
-                end
-            end
-        end
-    end
-
-    -- 6. Directional Fly Loop (Terrain-Contour Bypass Engine)
-    if LocalPlayer and LocalPlayer.Character then
-        local char = LocalPlayer.Character
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChildOfClass("Humanoid")
-
-        if hrp and hum then
-            local flyVel = hrp:FindFirstChild("silent_fly_vel")
-            local flyGyro = hrp:FindFirstChild("silent_fly_gyro")
-
-            if Config.Character.Fly and hum.Health > 0 then
-                if not flyVel then
-                    flyVel = Instance.new("BodyVelocity")
-                    flyVel.Name = "silent_fly_vel"
-                    flyVel.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-                    flyVel.Parent = hrp
-                end
-                if not flyGyro then
-                    flyGyro = Instance.new("BodyGyro")
-                    flyGyro.Name = "silent_fly_gyro"
-                    flyGyro.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
-                    flyGyro.P = 9e4
-                    flyGyro.Parent = hrp
-                end
-
-                hum.PlatformStand = true
-
-                local camCF = Camera.CFrame
-                local flatLook = Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z).Unit
-                local flatRight = Vector3.new(camCF.RightVector.X, 0, camCF.RightVector.Z).Unit
-                local horizDir = Vector3.zero
-
-                if UserInputService:IsKeyDown(Enum.KeyCode.W) then horizDir = horizDir + flatLook end
-                if UserInputService:IsKeyDown(Enum.KeyCode.S) then horizDir = horizDir - flatLook end
-                if UserInputService:IsKeyDown(Enum.KeyCode.A) then horizDir = horizDir - flatRight end
-                if UserInputService:IsKeyDown(Enum.KeyCode.D) then horizDir = horizDir + flatRight end
-
-                local horizVelocity = Vector3.zero
-                if horizDir.Magnitude > 0 then
-                    horizVelocity = horizDir.Unit * Config.Character.FlySpeed
-                end
-
-                local targetYVel = 0
-
-                if Config.Character.FlightMode == "Hover Glide (Anti-Snapback)" then
-                    -- Ground Raycast to contour terrain & obstacles while maintaining grounded distance (<5 studs)
-                    local rayParams = RaycastParams.new()
-                    rayParams.FilterType = Enum.RaycastFilterType.Exclude
-                    local ignoreList = { Camera, char }
-                    rayParams.FilterDescendantsInstances = ignoreList
-
-                    local downHit = Workspace:Raycast(hrp.Position + Vector3.new(0, 3, 0), Vector3.new(0, -40, 0), rayParams)
-                    local groundY = downHit and downHit.Position.Y or (hrp.Position.Y - 3)
-                    local hoverOffset = 3.3
-                    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-                        hoverOffset = 4.2
-                    end
-                    local targetY = groundY + hoverOffset
-                    targetYVel = math.clamp((targetY - hrp.Position.Y) * 12, -20, 20)
-
-                elseif Config.Character.FlightMode == "Wave Hop (Wall Climber)" then
-                    local now = tick()
-                    if not flyAirtimeStart then flyAirtimeStart = now end
-                    local airtime = now - flyAirtimeStart
-
-                    if airtime < 0.65 then
-                        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-                            targetYVel = 18
-                        elseif UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
-                            targetYVel = -18
-                        else
-                            targetYVel = 0
-                        end
-                    elseif airtime < 0.8 then
-                        targetYVel = -35
-                    else
-                        flyAirtimeStart = now
-                    end
-
-                else -- "Uncapped Free Flight"
-                    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-                        targetYVel = Config.Character.FlySpeed
-                    elseif UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
-                        targetYVel = -Config.Character.FlySpeed
-                    else
-                        targetYVel = 0
-                    end
-                end
-
-                flyVel.Velocity = Vector3.new(horizVelocity.X, targetYVel, horizVelocity.Z)
-                flyGyro.CFrame = camCF
-            else
-                if flyVel then flyVel:Destroy() end
-                if flyGyro then flyGyro:Destroy() end
-                if hum.PlatformStand and not Config.Character.Fly then
-                    -- Zero out downward momentum so turning off fly never triggers fall damage
-                    hrp.AssemblyLinearVelocity = Vector3.new(hrp.AssemblyLinearVelocity.X, 0, hrp.AssemblyLinearVelocity.Z)
-                    hum.PlatformStand = false
-                end
-                flyAirtimeStart = nil
-            end
+    -- 5. Safe Fall Damage Dampener
+    if Config.Character.AntiFallDamage and LocalPlayer and LocalPlayer.Character then
+        local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hrp and hrp.AssemblyLinearVelocity.Y < -20 then
+            hrp.AssemblyLinearVelocity = Vector3.new(hrp.AssemblyLinearVelocity.X, -15, hrp.AssemblyLinearVelocity.Z)
         end
     end
 
@@ -2257,6 +2150,149 @@ RunService.RenderStepped:Connect(function()
                     end
                 end
             end
+        end
+    end
+end)
+
+-- =========================================================================
+-- SECTION 10: ANTI-RUBBERBAND VELOCITY, FLIGHT & NOCLIP ENGINE
+-- =========================================================================
+-- Enforces horizontal velocity budget (<20.4 studs/s), terrain contour hover,
+-- and ground-safe NoClip on RunService.Heartbeat (post-simulation).
+
+local flyAirtimeStart = nil
+
+RunService.Heartbeat:Connect(function()
+    if not (LocalPlayer and LocalPlayer.Character) then return end
+    local char = LocalPlayer.Character
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not (hrp and hum and hum.Health > 0) then return end
+
+    -- Cleanup legacy BodyMovers if present
+    local oldBv = hrp:FindFirstChild("silent_fly_vel")
+    if oldBv then oldBv:Destroy() end
+    local oldBg = hrp:FindFirstChild("silent_fly_gyro")
+    if oldBg then oldBg:Destroy() end
+    if hum.PlatformStand and not Config.Character.Fly then
+        hum.PlatformStand = false
+    end
+
+    local currentVel = hrp.AssemblyLinearVelocity
+    local horizVec = Vector2.new(currentVel.X, currentVel.Z)
+    local maxAllowedSpeed = math.clamp(Config.Character.SpeedValue, 14, 20.4)
+
+    -- 1. Anti-Snap Directional Flight
+    if Config.Character.Fly then
+        local camCF = Camera.CFrame
+        local flatLook = Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z).Unit
+        local flatRight = Vector3.new(camCF.RightVector.X, 0, camCF.RightVector.Z).Unit
+        local horizDir = Vector3.zero
+
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then horizDir = horizDir + flatLook end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then horizDir = horizDir - flatLook end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then horizDir = horizDir - flatRight end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then horizDir = horizDir + flatRight end
+
+        local targetHorizVel = Vector3.zero
+        if horizDir.Magnitude > 0 then
+            targetHorizVel = horizDir.Unit * math.clamp(Config.Character.FlySpeed, 10, 20.4)
+        end
+
+        local targetYVel = 0
+        if Config.Character.FlightMode == "Hover Glide (Anti-Snapback)" then
+            -- Raycast downward to lock altitude <= 4.0 studs above ground (Havoc check triggers at > 5.0)
+            local rayParams = RaycastParams.new()
+            rayParams.FilterType = Enum.RaycastFilterType.Exclude
+            rayParams.FilterDescendantsInstances = { Camera, char }
+
+            local downHit = Workspace:Raycast(hrp.Position + Vector3.new(0, 2, 0), Vector3.new(0, -35, 0), rayParams)
+            local groundY = downHit and downHit.Position.Y or (hrp.Position.Y - 3)
+            local targetHover = 3.6
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                targetHover = 4.4
+            end
+            local desiredY = groundY + targetHover
+            targetYVel = math.clamp((desiredY - hrp.Position.Y) * 12, -18, 18)
+
+        elseif Config.Character.FlightMode == "Wave Hop (Wall Climber)" then
+            local now = tick()
+            if not flyAirtimeStart then flyAirtimeStart = now end
+            local airtime = now - flyAirtimeStart
+
+            if airtime < 0.5 then
+                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                    targetYVel = 18
+                elseif UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+                    targetYVel = -18
+                end
+            elseif airtime < 0.75 then
+                targetYVel = -25 -- Force ground touch to reset server airtime counter
+            else
+                flyAirtimeStart = now
+            end
+
+        else -- Uncapped Free Flight
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                targetYVel = math.clamp(Config.Character.FlySpeed, 10, 20.4)
+            elseif UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+                targetYVel = -math.clamp(Config.Character.FlySpeed, 10, 20.4)
+            end
+        end
+
+        hrp.AssemblyLinearVelocity = Vector3.new(targetHorizVel.X, targetYVel, targetHorizVel.Z)
+
+    -- 2. WalkSpeed Override via Direct Linear Velocity
+    elseif Config.Character.SpeedOverride and hum.MoveDirection.Magnitude > 0 then
+        local moveDir = hum.MoveDirection.Unit
+        hrp.AssemblyLinearVelocity = Vector3.new(moveDir.X * maxAllowedSpeed, currentVel.Y, moveDir.Z * maxAllowedSpeed)
+
+    -- 3. Hard Velocity Budget Clamp (Prevents Havoc >21 studs/s packet drop)
+    else
+        if horizVec.Magnitude > 20.4 then
+            local clamped = horizVec.Unit * 20.4
+            hrp.AssemblyLinearVelocity = Vector3.new(clamped.X, currentVel.Y, clamped.Y)
+        end
+    end
+
+    -- 4. NoClip Ground-Surface Retention (Phases through walls, locks to floor)
+    if Config.Character.NoClip and not Config.Character.Fly then
+        local rayParams = RaycastParams.new()
+        rayParams.FilterType = Enum.RaycastFilterType.Exclude
+        rayParams.FilterDescendantsInstances = { Camera, char }
+
+        local groundCheck = Workspace:Raycast(hrp.Position, Vector3.new(0, -6, 0), rayParams)
+        if groundCheck and currentVel.Y < 0 then
+            local floorY = groundCheck.Position.Y + (hum.HipHeight > 0 and hum.HipHeight + 1.2 or 3.0)
+            if hrp.Position.Y < floorY then
+                hrp.CFrame = CFrame.new(hrp.Position.X, floorY, hrp.Position.Z) * hrp.CFrame.Rotation
+                hrp.AssemblyLinearVelocity = Vector3.new(hrp.AssemblyLinearVelocity.X, 0, hrp.AssemblyLinearVelocity.Z)
+            end
+        end
+    end
+end)
+
+-- CharacterController Stamina Memory Patch Loop
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if Config.Character.InfiniteStamina and LocalPlayer and LocalPlayer.Character then
+            pcall(function()
+                local scripts = LocalPlayer.Character:FindFirstChild("Scripts")
+                local cc = scripts and scripts:FindFirstChild("CharacterController")
+                local getsenv_fn = getsenv or (getgenv and getgenv().getsenv)
+                if cc and typeof(getsenv_fn) == "function" then
+                    local env = getsenv_fn(cc)
+                    for k, v in pairs(env) do
+                        local lower = string.lower(tostring(k))
+                        if string.find(lower, "stamina") or string.find(lower, "energy") then
+                            if typeof(v) == "number" then
+                                env[k] = 100
+                            end
+                        end
+                    end
+                end
+            end)
         end
     end
 end)
