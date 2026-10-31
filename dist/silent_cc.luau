@@ -119,12 +119,22 @@ local Config = {
         Distances = false,
         Tracers = false,
         TracerOrigin = "Bottom",
-        IncludeScavs = true,
-        TeamCheck = false,
-        MaxDistance = 2000,
-        BoxColor = Color3.fromRGB(255, 255, 255),
+        ShowPlayers = true,
+        ShowNpcs = true,
+        PlayerBoxColor = Color3.fromRGB(0, 200, 255),
+        NpcBoxColor = Color3.fromRGB(255, 170, 0),
         TracerColor = Color3.fromRGB(0, 110, 255),
+        MaxDistance = 2000,
         Engine = "Auto (Dual Layer)",
+    },
+    Loot = {
+        Enabled = false,
+        Weapons = true,
+        Ammo = true,
+        Containers = true,
+        MaxDistance = 450,
+        ItemColor = Color3.fromRGB(0, 255, 140),
+        ContainerColor = Color3.fromRGB(255, 215, 0),
     },
     Visuals = {
         Chams = false,
@@ -138,6 +148,7 @@ local Config = {
         Fly = false,
         FlySpeed = 20,
         FlightMode = "Hover Glide (Anti-Snapback)",
+        AntiFallDamage = true,
         InfiniteStamina = true,
         NoSlowdown = true,
         BunnyHop = false,
@@ -184,7 +195,10 @@ local function resolveEntity(model)
     local isPlayer = false
     if player then
         isPlayer = true
-        displayName = player.DisplayName .. " (@" .. player.Name .. ")"
+        displayName = "[PLAYER] " .. player.DisplayName .. " (@" .. player.Name .. ")"
+    else
+        isPlayer = false
+        displayName = "[AI SCAV] " .. model.Name
     end
 
     return {
@@ -272,6 +286,71 @@ local function getTargetBone(model, requestedPart)
         return model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("Head")
     end
 end
+
+-- =========================================================================
+-- SECTION 4B: HAVOC WORLD LOOT & CONTAINER SCANNER
+-- =========================================================================
+local ActiveLoot = {}
+
+local function inspectLootInstance(inst)
+    if not inst then return nil end
+
+    if inst:IsA("ProximityPrompt") then
+        local parent = inst.Parent
+        if parent and (parent:IsA("BasePart") or parent:IsA("Model")) then
+            local pos = parent:IsA("BasePart") and parent.Position or parent:GetPivot().Position
+            local name = inst.ObjectText
+            if not name or name == "" then name = inst.ActionText end
+            if not name or name == "" then name = parent.Name end
+
+            local lower = string.lower(name)
+            local isContainer = string.find(lower, "crate") or string.find(lower, "box") or string.find(lower, "safe") or string.find(lower, "container") or string.find(lower, "bag") or string.find(lower, "chest")
+            return {
+                Instance = parent,
+                Name = name,
+                Position = pos,
+                IsContainer = isContainer,
+            }
+        end
+    end
+
+    if inst:IsA("Tool") and inst.Parent == Workspace then
+        local handle = inst:FindFirstChild("Handle") or inst:FindFirstChildOfClass("BasePart")
+        if handle then
+            return {
+                Instance = inst,
+                Name = inst.Name,
+                Position = handle.Position,
+                IsContainer = false,
+            }
+        end
+    end
+
+    return nil
+end
+
+local function scanWorldLoot()
+    local found = {}
+    for _, prompt in ipairs(Workspace:GetDescendants()) do
+        if prompt:IsA("ProximityPrompt") then
+            local item = inspectLootInstance(prompt)
+            if item then found[item.Instance] = item end
+        elseif prompt:IsA("Tool") and prompt.Parent == Workspace then
+            local item = inspectLootInstance(prompt)
+            if item then found[item.Instance] = item end
+        end
+    end
+    ActiveLoot = found
+end
+
+task.spawn(function()
+    while true do
+        task.wait(2)
+        if Config.Loot.Enabled then
+            pcall(scanWorldLoot)
+        end
+    end
+end)
 
 -- =========================================================================
 -- SECTION 5: COMBAT HOOKS, WALLBANG PIPELINES & TELEMETRY
@@ -1640,6 +1719,8 @@ local EspTab = Window:CreateTab("Esp")
 
 local PlayerEspGroup = EspTab:CreateGroupbox("Player & NPC ESP", "Left")
 PlayerEspGroup:AddToggle("Enabled", Config.Esp.Enabled, { Callback = function(v) Config.Esp.Enabled = v end })
+PlayerEspGroup:AddToggle("Show Real Players", Config.Esp.ShowPlayers, { Callback = function(v) Config.Esp.ShowPlayers = v end })
+PlayerEspGroup:AddToggle("Show AI Scavengers", Config.Esp.ShowNpcs, { Callback = function(v) Config.Esp.ShowNpcs = v end })
 PlayerEspGroup:AddToggle("Box ESP", Config.Esp.Boxes, { Callback = function(v) Config.Esp.Boxes = v end })
 PlayerEspGroup:AddToggle("Health Bar", Config.Esp.Health, { Callback = function(v) Config.Esp.Health = v end })
 PlayerEspGroup:AddToggle("Name Tags", Config.Esp.Names, { Callback = function(v) Config.Esp.Names = v end })
@@ -1648,13 +1729,12 @@ PlayerEspGroup:AddToggle("Snapline Tracers", Config.Esp.Tracers, { Callback = fu
 PlayerEspGroup:AddToggle("Chams Highlight", Config.Visuals.Chams, { Callback = function(v) Config.Visuals.Chams = v end })
 PlayerEspGroup:AddDropdown("Tracer Origin", { "Bottom", "Center", "Mouse" }, Config.Esp.TracerOrigin, function(v) Config.Esp.TracerOrigin = v end)
 
-local EspConfigGroup = EspTab:CreateGroupbox("ESP Settings", "Right")
+local EspConfigGroup = EspTab:CreateGroupbox("ESP Settings & Colors", "Right")
 EspConfigGroup:AddDropdown("ESP Engine", { "Auto (Dual Layer)", "Drawing (2D)", "Billboard (Native)" }, Config.Esp.Engine, function(v) Config.Esp.Engine = v end)
-EspConfigGroup:AddToggle("Include AI Scavengers", Config.Esp.IncludeScavs, { Callback = function(v) Config.Esp.IncludeScavs = v end })
-EspConfigGroup:AddToggle("Team Check", Config.Esp.TeamCheck, { Callback = function(v) Config.Esp.TeamCheck = v end })
-EspConfigGroup:AddSlider("Max Distance", 100, 3000, Config.Esp.MaxDistance, " studs", function(v) Config.Esp.MaxDistance = v end)
-EspConfigGroup:AddColorPicker("Box Color", Config.Esp.BoxColor, function(col) Config.Esp.BoxColor = col end)
+EspConfigGroup:AddColorPicker("Player Box Color", Config.Esp.PlayerBoxColor, function(col) Config.Esp.PlayerBoxColor = col end)
+EspConfigGroup:AddColorPicker("AI / Scav Color", Config.Esp.NpcBoxColor, function(col) Config.Esp.NpcBoxColor = col end)
 EspConfigGroup:AddColorPicker("Tracer Color", Config.Esp.TracerColor, function(col) Config.Esp.TracerColor = col end)
+EspConfigGroup:AddSlider("Max Distance", 100, 3000, Config.Esp.MaxDistance, " studs", function(v) Config.Esp.MaxDistance = v end)
 
 -- TAB 3: VISUALS
 local VisualsTab = Window:CreateTab("Visuals")
@@ -1665,15 +1745,24 @@ ChamsGroup:AddColorPicker("Visible Color", Config.Visuals.VisibleColor, function
 ChamsGroup:AddColorPicker("Hidden Color", Config.Visuals.HiddenColor, function(col) Config.Visuals.HiddenColor = col end)
 ChamsGroup:AddSlider("Outline Transparency", 0, 100, Config.Visuals.Transparency, "%", function(v) Config.Visuals.Transparency = v end)
 
-local WorldGroup = VisualsTab:CreateGroupbox("World ESP", "Right")
-WorldGroup:AddToggle("Dropped Weapons", false)
-WorldGroup:AddToggle("Ammo Crates", false)
-WorldGroup:AddToggle("Objective Markers", false)
+local WorldGroup = VisualsTab:CreateGroupbox("World Loot ESP", "Right")
+WorldGroup:AddToggle("Enable Loot ESP", Config.Loot.Enabled, {
+    Callback = function(v)
+        Config.Loot.Enabled = v
+        if v then pcall(scanWorldLoot) end
+    end
+})
+WorldGroup:AddToggle("Dropped Weapons & Items", Config.Loot.Weapons, { Callback = function(v) Config.Loot.Weapons = v end })
+WorldGroup:AddToggle("Crates & Safes", Config.Loot.Containers, { Callback = function(v) Config.Loot.Containers = v end })
+WorldGroup:AddSlider("Loot Max Distance", 50, 800, Config.Loot.MaxDistance, " studs", function(v) Config.Loot.MaxDistance = v end)
+WorldGroup:AddColorPicker("Item Color", Config.Loot.ItemColor, function(col) Config.Loot.ItemColor = col end)
+WorldGroup:AddColorPicker("Crate / Safe Color", Config.Loot.ContainerColor, function(col) Config.Loot.ContainerColor = col end)
 
 -- TAB 4: CHARACTER
 local CharTab = Window:CreateTab("Character")
 
 local MovementGroup = CharTab:CreateGroupbox("Movement", "Left")
+MovementGroup:AddToggle("Anti-Fall Damage (Safe Land)", Config.Character.AntiFallDamage, { Callback = function(v) Config.Character.AntiFallDamage = v end })
 MovementGroup:AddToggle("WalkSpeed Override", Config.Character.SpeedOverride, {
     Callback = function(enabled)
         Config.Character.SpeedOverride = enabled
@@ -1873,7 +1962,15 @@ RunService.RenderStepped:Connect(function()
             local hum = ent.Humanoid
             local worldDist = (hrp.Position - Camera.CFrame.Position).Magnitude
             local inRange = worldDist <= Config.Esp.MaxDistance
-            local allowEntity = ent.IsPlayer or Config.Esp.IncludeScavs
+
+            local allowEntity = false
+            if ent.IsPlayer and Config.Esp.ShowPlayers then
+                allowEntity = true
+            elseif not ent.IsPlayer and Config.Esp.ShowNpcs then
+                allowEntity = true
+            end
+
+            local activeColor = ent.IsPlayer and Config.Esp.PlayerBoxColor or Config.Esp.NpcBoxColor
 
             -- --- Native BillboardGui ESP Engine ---
             local bb = BillboardEspPool[model]
@@ -1888,7 +1985,7 @@ RunService.RenderStepped:Connect(function()
                 if boxFrame then
                     boxFrame.Visible = Config.Esp.Boxes
                     local stroke = boxFrame:FindFirstChild("Stroke")
-                    if stroke then stroke.Color = Config.Esp.BoxColor end
+                    if stroke then stroke.Color = activeColor end
                 end
 
                 local hpBg = bb:FindFirstChild("HpBg")
@@ -1944,7 +2041,7 @@ RunService.RenderStepped:Connect(function()
 
                             esp.Box.Size = Vector2.new(width, height)
                             esp.Box.Position = boxPos
-                            esp.Box.Color = Config.Esp.BoxColor
+                            esp.Box.Color = activeColor
                             esp.Box.Visible = true
                         else
                             esp.BoxOutline.Visible = false
@@ -2024,6 +2121,68 @@ RunService.RenderStepped:Connect(function()
                 hl.OutlineTransparency = Config.Visuals.Transparency / 100
             else
                 if hl then hl:Destroy() end
+            end
+        end
+    end
+
+    -- 4B. World Loot ESP Render Loop
+    if Config.Loot.Enabled then
+        for inst, loot in pairs(ActiveLoot) do
+            if not inst.Parent then
+                ActiveLoot[inst] = nil
+            else
+                local dist = (loot.Position - Camera.CFrame.Position).Magnitude
+                if dist <= Config.Loot.MaxDistance then
+                    local showItem = (loot.IsContainer and Config.Loot.Containers) or (not loot.IsContainer and Config.Loot.Weapons)
+                    if showItem then
+                        local screen3D, onScreen = Camera:WorldToViewportPoint(loot.Position)
+                        if onScreen and screen3D.Z > 0 then
+                            -- Native BillboardGui for Loot
+                            local lootBb = inst:FindFirstChild("silent_loot_bb")
+                            if not lootBb then
+                                lootBb = Instance.new("BillboardGui")
+                                lootBb.Name = "silent_loot_bb"
+                                lootBb.AlwaysOnTop = true
+                                lootBb.ClipsDescendants = false
+                                lootBb.Size = UDim2.new(0, 150, 0, 26)
+                                lootBb.Adornee = inst:IsA("Model") and (inst.PrimaryPart or inst:FindFirstChildOfClass("BasePart")) or inst
+                                lootBb.Parent = inst
+
+                                local lbl = Instance.new("TextLabel")
+                                lbl.Name = "LootLabel"
+                                lbl.Size = UDim2.new(1, 0, 1, 0)
+                                lbl.BackgroundTransparency = 1
+                                lbl.Font = Enum.Font.RobotoMono
+                                lbl.TextSize = 10
+                                lbl.TextStrokeTransparency = 0.2
+                                lbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+                                lbl.Parent = lootBb
+                            end
+
+                            lootBb.Enabled = true
+                            local lbl = lootBb:FindFirstChild("LootLabel")
+                            if lbl then
+                                local col = loot.IsContainer and Config.Loot.ContainerColor or Config.Loot.ItemColor
+                                lbl.TextColor3 = col
+                                lbl.Text = string.format("%s%s [%dm]", loot.IsContainer and "[CRATE] " or "[LOOT] ", loot.Name, math.floor(dist))
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- 4C. Anti-Fall Damage Velocity Neutralizer
+    if Config.Character.AntiFallDamage and LocalPlayer and LocalPlayer.Character then
+        local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hrp and hum and hum.Health > 0 then
+            -- Havoc deals lethal fall damage when impact velocity exceeds -45 studs/s
+            -- Clamping downward speed at -20 studs/s guarantees 0 fall damage on impact
+            if hrp.AssemblyLinearVelocity.Y < -24 then
+                local v = hrp.AssemblyLinearVelocity
+                hrp.AssemblyLinearVelocity = Vector3.new(v.X, -18, v.Z)
             end
         end
     end
@@ -2140,6 +2299,8 @@ RunService.RenderStepped:Connect(function()
                 if flyVel then flyVel:Destroy() end
                 if flyGyro then flyGyro:Destroy() end
                 if hum.PlatformStand and not Config.Character.Fly then
+                    -- Zero out downward momentum so turning off fly never triggers fall damage
+                    hrp.AssemblyLinearVelocity = Vector3.new(hrp.AssemblyLinearVelocity.X, 0, hrp.AssemblyLinearVelocity.Z)
                     hum.PlatformStand = false
                 end
                 flyAirtimeStart = nil
