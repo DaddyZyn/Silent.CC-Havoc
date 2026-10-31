@@ -107,6 +107,9 @@ local Config = {
         WallSpread = false,
         DistanceLimit = false,
         MaxDistance = 150,
+        Wallbang = "Disabled",
+        WallbangOffset = 5,
+        LogHits = true,
     },
     Esp = {
         Enabled = false,
@@ -271,9 +274,68 @@ local function getTargetBone(model, requestedPart)
 end
 
 -- =========================================================================
--- SECTION 5: COMBAT HOOKS (SILENT AIM & ANTICHEAT)
+-- SECTION 5: COMBAT HOOKS, WALLBANG PIPELINES & TELEMETRY
 -- =========================================================================
 local currentSilentTargetBone = nil
+local lastShotTelemetry = nil
+
+local function logShotTelemetry(methodName, targetBone)
+    if not Config.SilentAim.LogHits or not targetBone then return end
+    local targetModel = targetBone.Parent
+    local ent = targetModel and ActiveEntities[targetModel]
+    local hum = ent and ent.Humanoid or (targetModel and targetModel:FindFirstChildOfClass("Humanoid"))
+    local startHp = hum and hum.Health or 100
+    local targetName = ent and ent.DisplayName or (targetModel and targetModel.Name or "Enemy")
+
+    lastShotTelemetry = {
+        Method = methodName,
+        TargetName = targetName,
+        Humanoid = hum,
+        InitialHp = startHp,
+        Time = tick(),
+        Reported = false,
+    }
+    print(string.format("[silent.cc telemetry] Shot Fired [%s] -> Target: %s (HP: %d)", methodName, targetName, math.floor(startHp)))
+end
+
+-- Asynchronous hit confirmation monitor
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if lastShotTelemetry and not lastShotTelemetry.Reported then
+            local now = tick()
+            local elapsed = now - lastShotTelemetry.Time
+            local hum = lastShotTelemetry.Humanoid
+
+            if hum and hum.Parent then
+                local currentHp = hum.Health
+                if currentHp < lastShotTelemetry.InitialHp then
+                    local damage = lastShotTelemetry.InitialHp - currentHp
+                    lastShotTelemetry.Reported = true
+                    print(string.format("[silent.cc telemetry] >>> HIT CONFIRMED! Target: %s took -%d damage! Remaining: %d HP [%s WORKS]",
+                        lastShotTelemetry.TargetName, math.floor(damage), math.floor(currentHp), lastShotTelemetry.Method))
+                elseif elapsed > 0.85 then
+                    lastShotTelemetry.Reported = true
+                    print(string.format("[silent.cc telemetry] --- SHOT DROPPED BY SERVER (No damage after 0.85s) [%s]", lastShotTelemetry.Method))
+                end
+            elseif elapsed > 0.85 then
+                lastShotTelemetry.Reported = true
+            end
+        end
+    end
+end)
+
+local function getHitPosRemote()
+    local repStorage = game:GetService("ReplicatedStorage")
+    local storage = repStorage:FindFirstChild("Storage")
+    if storage then
+        local events = storage:FindFirstChild("Events")
+        if events then
+            return events:FindFirstChild("hitPos")
+        end
+    end
+    return nil
+end
 
 if typeof(hookmeta) == "function" then
     pcall(function()
@@ -292,26 +354,65 @@ if typeof(hookmeta) == "function" then
                 return
             end
 
-            -- 3. hitPos Redirection
+            -- 3. hitPos Redirection & Telemetry
             if Config.SilentAim.Enabled and currentSilentTargetBone and (method == "FireServer" or method == "fireServer") and tostring(self.Name) == "hitPos" then
                 if math.random(1, 100) <= Config.SilentAim.HitRate then
                     if typeof(args[2]) == "Vector3" then
                         args[2] = currentSilentTargetBone.Position
                         args[1] = currentSilentTargetBone
+                        logShotTelemetry("hitPos Replication", currentSilentTargetBone)
                         return oldNamecall(self, unpack(args))
                     end
                 end
             end
 
-            -- 4. Raycast Redirection
+            -- 4. Raycast Redirection & Experimental Wallbang Pipelines
             if (method == "Raycast" or method == "raycast") and self == Workspace then
                 if Config.SilentAim.Enabled and currentSilentTargetBone and math.random(1, 100) <= Config.SilentAim.HitRate then
                     local origin = args[1]
                     local direction = args[2]
+                    local params = args[3]
+                    local targetPos = currentSilentTargetBone.Position
+                    local targetModel = currentSilentTargetBone.Parent
+
                     if typeof(origin) == "Vector3" and typeof(direction) == "Vector3" then
-                        local targetPos = currentSilentTargetBone.Position
-                        args[2] = (targetPos - origin).Unit * direction.Magnitude
-                        return oldNamecall(self, unpack(args))
+                        local wbMode = Config.SilentAim.Wallbang
+
+                        if wbMode == "Method 1: Penetration Filter" then
+                            -- Override RaycastParams to strictly whitelist the target model (passes through all walls)
+                            if typeof(params) == "RaycastParams" and targetModel then
+                                params.FilterType = Enum.RaycastFilterType.Include
+                                params.FilterDescendantsInstances = { targetModel }
+                            end
+                            args[2] = (targetPos - origin).Unit * direction.Magnitude
+                            logShotTelemetry("Method 1 (Penetration Filter)", currentSilentTargetBone)
+                            return oldNamecall(self, unpack(args))
+
+                        elseif wbMode == "Method 2: Muzzle Forward Bias" then
+                            -- Offset ray origin forward along bullet trajectory to clear thin cover
+                            local offsetDist = Config.SilentAim.WallbangOffset or 5
+                            local dirUnit = (targetPos - origin).Unit
+                            local newOrigin = origin + (dirUnit * offsetDist)
+                            args[1] = newOrigin
+                            args[2] = (targetPos - newOrigin).Unit * direction.Magnitude
+                            logShotTelemetry("Method 2 (Muzzle Forward Bias)", currentSilentTargetBone)
+                            return oldNamecall(self, unpack(args))
+
+                        elseif wbMode == "Method 3: hitPos RPC Injection" then
+                            -- Force direct hitPos remote transmission regardless of ray collision
+                            local hitPosRemote = getHitPosRemote()
+                            if hitPosRemote and hitPosRemote:IsA("RemoteEvent") then
+                                hitPosRemote:FireServer(currentSilentTargetBone, targetPos)
+                            end
+                            args[2] = (targetPos - origin).Unit * direction.Magnitude
+                            logShotTelemetry("Method 3 (hitPos RPC Injection)", currentSilentTargetBone)
+                            return oldNamecall(self, unpack(args))
+
+                        else
+                            -- Standard Silent Aim Redirection
+                            args[2] = (targetPos - origin).Unit * direction.Magnitude
+                            return oldNamecall(self, unpack(args))
+                        end
                     end
                 end
             end
@@ -328,8 +429,36 @@ if typeof(hookfn) == "function" and typeof(Workspace.Raycast) == "function" then
             if Config.SilentAim.Enabled and currentSilentTargetBone and math.random(1, 100) <= Config.SilentAim.HitRate then
                 if typeof(origin) == "Vector3" and typeof(direction) == "Vector3" then
                     local targetPos = currentSilentTargetBone.Position
-                    local newDir = (targetPos - origin).Unit * direction.Magnitude
-                    return oldRaycast(self, origin, newDir, params)
+                    local targetModel = currentSilentTargetBone.Parent
+                    local wbMode = Config.SilentAim.Wallbang
+
+                    if wbMode == "Method 1: Penetration Filter" then
+                        if typeof(params) == "RaycastParams" and targetModel then
+                            params.FilterType = Enum.RaycastFilterType.Include
+                            params.FilterDescendantsInstances = { targetModel }
+                        end
+                        local newDir = (targetPos - origin).Unit * direction.Magnitude
+                        return oldRaycast(self, origin, newDir, params)
+
+                    elseif wbMode == "Method 2: Muzzle Forward Bias" then
+                        local offsetDist = Config.SilentAim.WallbangOffset or 5
+                        local dirUnit = (targetPos - origin).Unit
+                        local newOrigin = origin + (dirUnit * offsetDist)
+                        local newDir = (targetPos - newOrigin).Unit * direction.Magnitude
+                        return oldRaycast(self, newOrigin, newDir, params)
+
+                    elseif wbMode == "Method 3: hitPos RPC Injection" then
+                        local hitPosRemote = getHitPosRemote()
+                        if hitPosRemote and hitPosRemote:IsA("RemoteEvent") then
+                            hitPosRemote:FireServer(currentSilentTargetBone, targetPos)
+                        end
+                        local newDir = (targetPos - origin).Unit * direction.Magnitude
+                        return oldRaycast(self, origin, newDir, params)
+
+                    else
+                        local newDir = (targetPos - origin).Unit * direction.Magnitude
+                        return oldRaycast(self, origin, newDir, params)
+                    end
                 end
             end
             return oldRaycast(self, origin, direction, params)
@@ -1494,6 +1623,14 @@ SilentGroup:AddSlider("Circle Y Offset", 0, 60, Config.SilentAim.Offset, "", fun
 
 local ExtraSilentGroup = MainTab:CreateGroupbox("Extra - SilentAim", "Right")
 ExtraSilentGroup:AddToggle("Disable When Carried", false)
+ExtraSilentGroup:AddDropdown("Wallbang Method", { "Disabled", "Method 1: Penetration Filter", "Method 2: Muzzle Forward Bias", "Method 3: hitPos RPC Injection" }, Config.SilentAim.Wallbang, function(v)
+    Config.SilentAim.Wallbang = v
+    print("[silent.cc] Wallbang Method set to: " .. tostring(v))
+end)
+ExtraSilentGroup:AddSlider("Muzzle Forward Offset", 1, 15, Config.SilentAim.WallbangOffset, " studs", function(v)
+    Config.SilentAim.WallbangOffset = v
+end)
+ExtraSilentGroup:AddToggle("Log Hit Registration", Config.SilentAim.LogHits, { Callback = function(v) Config.SilentAim.LogHits = v end })
 ExtraSilentGroup:AddToggle("Bullet Spread", Config.SilentAim.WallSpread, { Callback = function(v) Config.SilentAim.WallSpread = v end })
 ExtraSilentGroup:AddToggle("Distance Limit", Config.SilentAim.DistanceLimit, { Callback = function(v) Config.SilentAim.DistanceLimit = v end })
 ExtraSilentGroup:AddSlider("Max Distance", 50, 500, Config.SilentAim.MaxDistance, " studs", function(v) Config.SilentAim.MaxDistance = v end)
