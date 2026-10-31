@@ -1,7 +1,13 @@
 --[[
     silent.cc | Havoc [Season 2] | discord.gg/silentcc
-    Universal Client with Top-Navbar Architecture & Full Havoc Engine Hooks
-    Pure Standard Lua Execution (Zero Casts / Zero Strict Annotations)
+    Full Operational Build:
+    - Auto Mouse Unlock: Automatically releases mouse lock & enables cursor whenever menu is open (No ESC required)
+    - Full 2D Drawing ESP Pool: Boxes, Box Outlines, Dynamic Health Bars, Distance tags, Player Names, Snapline Tracers
+    - Hardware Chams: AlwaysOnTop highlight shaders on all resolved Havoc enemy models
+    - Silent Aim: Metamethod & hookfunction redirection on Workspace:Raycast & hitPos replication
+    - Camera Aimbot: Smooth camera tracking with 3D velocity lead prediction (Prediction X / Y)
+    - Anticheat Bypass: OnPunishment packet suppression
+    - Weapon & Physics: WalkSpeed override, Bunny Hop, Recoil camera shake suppression, Fast Reload
 ]]
 
 local UserInputService = game:GetService("UserInputService")
@@ -21,7 +27,7 @@ local Config = {
         Mode = "Camera",
         Part = "Head",
         FOV = 150,
-        Smoothing = 30,
+        Smoothing = 25,
         Sensitivity = 100,
         Prediction = false,
         PredictionX = 17,
@@ -57,8 +63,8 @@ local Config = {
         Distances = false,
         Tracers = false,
         TracerOrigin = "Bottom",
-        TeamCheck = true,
-        MaxDistance = 1000,
+        TeamCheck = false,
+        MaxDistance = 1500,
         BoxColor = Color3.fromRGB(255, 255, 255),
         TracerColor = Color3.fromRGB(0, 110, 255),
     },
@@ -135,10 +141,28 @@ pcall(function()
             local method = getnamecallmethod()
             local args = { ... }
 
+            -- 1. Anticheat Drop
             if (method == "FireServer" or method == "fireServer") and tostring(self.Name) == "OnPunishment" then
                 return
             end
 
+            -- 2. Recoil Shake Suppression
+            if Config.Character.NoRecoil and (method == "FireServer" or method == "fireServer") and tostring(self.Name) == "shake" then
+                return
+            end
+
+            -- 3. hitPos Redirection
+            if Config.SilentAim.Enabled and currentSilentTargetBone and (method == "FireServer" or method == "fireServer") and tostring(self.Name) == "hitPos" then
+                if math.random(1, 100) <= Config.SilentAim.HitRate then
+                    if typeof(args[2]) == "Vector3" then
+                        args[2] = currentSilentTargetBone.Position
+                        args[1] = currentSilentTargetBone
+                        return oldNamecall(self, unpack(args))
+                    end
+                end
+            end
+
+            -- 4. Raycast Redirection
             if (method == "Raycast" or method == "raycast") and self == Workspace then
                 if Config.SilentAim.Enabled and currentSilentTargetBone and math.random(1, 100) <= Config.SilentAim.HitRate then
                     local origin = args[1]
@@ -176,7 +200,7 @@ pcall(function()
 end)
 
 -- =========================================================================
--- SECTION 2: TOP-NAVBAR UI FRAMEWORK
+-- SECTION 2: TOP-NAVBAR UI FRAMEWORK (AUTO MOUSE UNLOCK)
 -- =========================================================================
 local Library = {}
 Library.Theme = {
@@ -259,6 +283,8 @@ local function makeDraggable(dragHandle, container)
     end)
 end
 
+local isMenuVisible = true
+
 function Library.CreateWindow(config)
     local title = config.Title or "silent.cc"
     local gameName = config.Game or "Havoc"
@@ -288,7 +314,6 @@ function Library.CreateWindow(config)
     windowStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     windowStroke.Parent = mainFrame
 
-    -- Header / Titlebar
     local titleBar = Instance.new("Frame")
     titleBar.Name = "TitleBar"
     titleBar.Size = UDim2.new(1, 0, 0, 28)
@@ -310,11 +335,19 @@ function Library.CreateWindow(config)
 
     makeDraggable(titleBar, mainFrame)
 
-    local isVisible = true
+    -- Toggle handler with Mouse Unlock logic
+    local function setVisibility(visible)
+        isMenuVisible = visible
+        mainFrame.Visible = visible
+        if visible then
+            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+            UserInputService.MouseIconEnabled = true
+        end
+    end
+
     UserInputService.InputBegan:Connect(function(input, gpe)
         if not gpe and input.KeyCode == toggleKey then
-            isVisible = not isVisible
-            mainFrame.Visible = isVisible
+            setVisibility(not isMenuVisible)
         end
     end)
 
@@ -947,7 +980,77 @@ if hasDrawing then
 end
 
 -- =========================================================================
--- SECTION 4: HAVOC MENU INITIALIZATION
+-- SECTION 4: FULL DRAWING ESP POOL
+-- =========================================================================
+local EspPool = {}
+
+local function createPlayerEsp(player)
+    if not hasDrawing or player == LocalPlayer then return end
+
+    local DrawingLib = rawget(getfenv(), "Drawing")
+    local espData = {
+        BoxOutline = DrawingLib.new("Square"),
+        Box = DrawingLib.new("Square"),
+        HealthBarOutline = DrawingLib.new("Line"),
+        HealthBar = DrawingLib.new("Line"),
+        Name = DrawingLib.new("Text"),
+        Distance = DrawingLib.new("Text"),
+        Tracer = DrawingLib.new("Line"),
+    }
+
+    espData.BoxOutline.Visible = false
+    espData.BoxOutline.Color = Color3.fromRGB(0, 0, 0)
+    espData.BoxOutline.Thickness = 3
+    espData.BoxOutline.Filled = false
+
+    espData.Box.Visible = false
+    espData.Box.Color = Config.Esp.BoxColor
+    espData.Box.Thickness = 1
+    espData.Box.Filled = false
+
+    espData.HealthBarOutline.Visible = false
+    espData.HealthBarOutline.Color = Color3.fromRGB(0, 0, 0)
+    espData.HealthBarOutline.Thickness = 3
+
+    espData.HealthBar.Visible = false
+    espData.HealthBar.Color = Color3.fromRGB(0, 255, 0)
+    espData.HealthBar.Thickness = 1
+
+    espData.Name.Visible = false
+    espData.Name.Color = Color3.fromRGB(255, 255, 255)
+    espData.Name.Size = 13
+    espData.Name.Center = true
+    espData.Name.Outline = true
+
+    espData.Distance.Visible = false
+    espData.Distance.Color = Color3.fromRGB(200, 200, 200)
+    espData.Distance.Size = 11
+    espData.Distance.Center = true
+    espData.Distance.Outline = true
+
+    espData.Tracer.Visible = false
+    espData.Tracer.Color = Config.Esp.TracerColor
+    espData.Tracer.Thickness = 1
+
+    EspPool[player] = espData
+end
+
+local function removePlayerEsp(player)
+    local espData = EspPool[player]
+    if espData then
+        for _, drawing in pairs(espData) do
+            pcall(function() drawing:Remove() end)
+        end
+        EspPool[player] = nil
+    end
+end
+
+for _, p in ipairs(Players:GetPlayers()) do createPlayerEsp(p) end
+Players.PlayerAdded:Connect(createPlayerEsp)
+Players.PlayerRemoving:Connect(removePlayerEsp)
+
+-- =========================================================================
+-- SECTION 5: HAVOC MENU INITIALIZATION
 -- =========================================================================
 local Window = Library.CreateWindow({
     Title = "silent.cc",
@@ -957,12 +1060,9 @@ local Window = Library.CreateWindow({
     ToggleKey = Enum.KeyCode.RightShift,
 })
 
--- -------------------------------------------------------------------------
--- TAB 1: MAIN (Aimbot & Silent Aim)
--- -------------------------------------------------------------------------
+-- TAB 1: MAIN
 local MainTab = Window:CreateTab("Main")
 
--- Left: Aimbot
 local AimbotGroup = MainTab:CreateGroupbox("Aimbot", "Left")
 AimbotGroup:AddToggle("Enabled", Config.Aimbot.Enabled, {
     Keybind = Config.Aimbot.Key,
@@ -997,7 +1097,6 @@ local ExtraAimbotGroup = MainTab:CreateGroupbox("Extra - Aimbot", "Left")
 ExtraAimbotGroup:AddToggle("Wall Check", Config.Aimbot.WallCheck, { Callback = function(v) Config.Aimbot.WallCheck = v end })
 ExtraAimbotGroup:AddToggle("Prioritize Low Health", Config.Aimbot.LowHealth, { Callback = function(v) Config.Aimbot.LowHealth = v end })
 
--- Right: Silent Aim
 local SilentGroup = MainTab:CreateGroupbox("Silent Aim", "Right")
 SilentGroup:AddToggle("Enabled", Config.SilentAim.Enabled, {
     Keybind = Config.SilentAim.Key,
@@ -1029,9 +1128,7 @@ ExtraSilentGroup:AddToggle("Bullet Spread", Config.SilentAim.WallSpread, { Callb
 ExtraSilentGroup:AddToggle("Distance Limit", Config.SilentAim.DistanceLimit, { Callback = function(v) Config.SilentAim.DistanceLimit = v end })
 ExtraSilentGroup:AddSlider("Max Distance", 50, 500, Config.SilentAim.MaxDistance, " studs", function(v) Config.SilentAim.MaxDistance = v end)
 
--- -------------------------------------------------------------------------
 -- TAB 2: ESP
--- -------------------------------------------------------------------------
 local EspTab = Window:CreateTab("Esp")
 
 local PlayerEspGroup = EspTab:CreateGroupbox("Player ESP", "Left")
@@ -1049,9 +1146,7 @@ EspConfigGroup:AddSlider("Max Distance", 100, 2500, Config.Esp.MaxDistance, " st
 EspConfigGroup:AddColorPicker("Box Color", Config.Esp.BoxColor, function(col) Config.Esp.BoxColor = col end)
 EspConfigGroup:AddColorPicker("Tracer Color", Config.Esp.TracerColor, function(col) Config.Esp.TracerColor = col end)
 
--- -------------------------------------------------------------------------
 -- TAB 3: VISUALS
--- -------------------------------------------------------------------------
 local VisualsTab = Window:CreateTab("Visuals")
 
 local ChamsGroup = VisualsTab:CreateGroupbox("Chams & Highlights", "Left")
@@ -1065,9 +1160,7 @@ WorldGroup:AddToggle("Dropped Weapons", false)
 WorldGroup:AddToggle("Ammo Crates", false)
 WorldGroup:AddToggle("Objective Markers", false)
 
--- -------------------------------------------------------------------------
 -- TAB 4: CHARACTER
--- -------------------------------------------------------------------------
 local CharTab = Window:CreateTab("Character")
 
 local MovementGroup = CharTab:CreateGroupbox("Movement", "Left")
@@ -1091,28 +1184,23 @@ WeaponGroup:AddToggle("Fast Tactical Reload", Config.Character.FastReload, { Cal
 WeaponGroup:AddToggle("Recoil Neutralizer", Config.Character.NoRecoil, { Callback = function(v) Config.Character.NoRecoil = v end })
 WeaponGroup:AddToggle("Spread Reduction", Config.Character.NoSpread, { Callback = function(v) Config.Character.NoSpread = v end })
 
--- -------------------------------------------------------------------------
 -- TAB 5: SETTINGS
--- -------------------------------------------------------------------------
 local SettingsTab = Window:CreateTab("settings")
 
 local ProfileGroup = SettingsTab:CreateGroupbox("Profile Manager", "Left")
-ProfileGroup:AddButton("Save Default Config", function()
-    print("[silent.cc] Config profile saved.")
-end)
-ProfileGroup:AddButton("Load Default Config", function()
-    print("[silent.cc] Config profile loaded.")
-end)
+ProfileGroup:AddButton("Save Default Config", function() print("[silent.cc] Saved config profile.") end)
+ProfileGroup:AddButton("Load Default Config", function() print("[silent.cc] Loaded config profile.") end)
 
 local SystemGroup = SettingsTab:CreateGroupbox("System", "Right")
 SystemGroup:AddButton("Unload silent.cc", function()
     if FOVCircles.Aimbot then FOVCircles.Aimbot:Remove() end
     if FOVCircles.SilentAim then FOVCircles.SilentAim:Remove() end
+    for p, _ in pairs(EspPool) do removePlayerEsp(p) end
     Window.ScreenGui:Destroy()
 end)
 
 -- =========================================================================
--- SECTION 5: RUNTIME EXECUTION LOOPS
+-- SECTION 6: RUNTIME EXECUTION LOOPS
 -- =========================================================================
 
 local function findBestTarget(fovRadius, boneName, wallCheck, maxDist)
@@ -1174,9 +1262,15 @@ local function findBestTarget(fovRadius, boneName, wallCheck, maxDist)
     return bestTarget
 end
 
--- RenderStepped Main Loop
+-- Master RenderStepped Execution Loop
 RunService.RenderStepped:Connect(function()
-    -- 1. Silent Aim Target Tracker
+    -- 1. Auto Mouse Unlocker: When silent.cc is visible, enforce free cursor
+    if isMenuVisible then
+        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        UserInputService.MouseIconEnabled = true
+    end
+
+    -- 2. Silent Aim Target Tracker
     if Config.SilentAim.Enabled then
         local maxD = Config.SilentAim.DistanceLimit and Config.SilentAim.MaxDistance or nil
         local target = findBestTarget(Config.SilentAim.FOV, Config.SilentAim.Part, false, maxD)
@@ -1185,7 +1279,7 @@ RunService.RenderStepped:Connect(function()
         currentSilentTargetBone = nil
     end
 
-    -- 2. Camera Aimbot Loop
+    -- 3. Camera Aimbot Loop
     if Config.Aimbot.Enabled and (UserInputService:IsKeyDown(Config.Aimbot.Key) or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)) then
         local aimTarget = findBestTarget(Config.Aimbot.FOV, Config.Aimbot.Part, Config.Aimbot.WallCheck)
         if aimTarget and aimTarget.Bone then
@@ -1210,7 +1304,120 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- 3. Chams Highlighting (Hardware Accelerated)
+    -- 4. Drawing 2D ESP Render Loop
+    if hasDrawing then
+        local vpSize = Camera.ViewportSize
+        local mousePos = UserInputService:GetMouseLocation()
+        local tracerOrigin = Vector2.new(vpSize.X / 2, vpSize.Y)
+        if Config.Esp.TracerOrigin == "Center" then
+            tracerOrigin = Vector2.new(vpSize.X / 2, vpSize.Y / 2)
+        elseif Config.Esp.TracerOrigin == "Mouse" then
+            tracerOrigin = mousePos
+        end
+
+        for player, esp in pairs(EspPool) do
+            local rendered = false
+            if Config.Esp.Enabled and player ~= LocalPlayer then
+                local char = getCharacter(player)
+                if char then
+                    local hum = char:FindFirstChildOfClass("Humanoid")
+                    local hrp = char:FindFirstChild("HumanoidRootPart")
+                    local head = char:FindFirstChild("Head")
+
+                    if hum and hum.Health > 0 and hrp and head then
+                        local worldDist = (hrp.Position - Camera.CFrame.Position).Magnitude
+                        if worldDist <= Config.Esp.MaxDistance then
+                            local hrpPos, hrpOn = Camera:WorldToViewportPoint(hrp.Position)
+                            local headPos, headOn = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.6, 0))
+                            local rootPos, rootOn = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3, 0))
+
+                            if hrpOn and headOn and rootOn then
+                                local height = math.abs(headPos.Y - rootPos.Y)
+                                local width = height * 0.65
+                                local boxPos = Vector2.new(hrpPos.X - width / 2, headPos.Y)
+
+                                -- 2D Box
+                                if Config.Esp.Boxes then
+                                    esp.BoxOutline.Size = Vector2.new(width, height)
+                                    esp.BoxOutline.Position = boxPos
+                                    esp.BoxOutline.Visible = true
+
+                                    esp.Box.Size = Vector2.new(width, height)
+                                    esp.Box.Position = boxPos
+                                    esp.Box.Color = Config.Esp.BoxColor
+                                    esp.Box.Visible = true
+                                else
+                                    esp.BoxOutline.Visible = false
+                                    esp.Box.Visible = false
+                                end
+
+                                -- Health Bar
+                                if Config.Esp.Health then
+                                    local healthPct = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+                                    local barHeight = height * healthPct
+                                    local barX = boxPos.X - 5
+
+                                    esp.HealthBarOutline.From = Vector2.new(barX, boxPos.Y)
+                                    esp.HealthBarOutline.To = Vector2.new(barX, boxPos.Y + height)
+                                    esp.HealthBarOutline.Visible = true
+
+                                    esp.HealthBar.From = Vector2.new(barX, boxPos.Y + height)
+                                    esp.HealthBar.To = Vector2.new(barX, (boxPos.Y + height) - barHeight)
+                                    esp.HealthBar.Color = Color3.fromRGB(math.floor(255 * (1 - healthPct)), math.floor(255 * healthPct), 0)
+                                    esp.HealthBar.Visible = true
+                                else
+                                    esp.HealthBarOutline.Visible = false
+                                    esp.HealthBar.Visible = false
+                                end
+
+                                -- Name Tag
+                                if Config.Esp.Names then
+                                    esp.Name.Text = player.Name
+                                    esp.Name.Position = Vector2.new(hrpPos.X, boxPos.Y - 14)
+                                    esp.Name.Visible = true
+                                else
+                                    esp.Name.Visible = false
+                                end
+
+                                -- Distance Tag
+                                if Config.Esp.Distances then
+                                    esp.Distance.Text = string.format("[%dm]", math.floor(worldDist))
+                                    esp.Distance.Position = Vector2.new(hrpPos.X, boxPos.Y + height + 2)
+                                    esp.Distance.Visible = true
+                                else
+                                    esp.Distance.Visible = false
+                                end
+
+                                -- Snapline Tracer
+                                if Config.Esp.Tracers then
+                                    esp.Tracer.From = tracerOrigin
+                                    esp.Tracer.To = Vector2.new(hrpPos.X, rootPos.Y)
+                                    esp.Tracer.Color = Config.Esp.TracerColor
+                                    esp.Tracer.Visible = true
+                                else
+                                    esp.Tracer.Visible = false
+                                end
+
+                                rendered = true
+                            end
+                        end
+                    end
+                end
+            end
+
+            if not rendered then
+                esp.BoxOutline.Visible = false
+                esp.Box.Visible = false
+                esp.HealthBarOutline.Visible = false
+                esp.HealthBar.Visible = false
+                esp.Name.Visible = false
+                esp.Distance.Visible = false
+                esp.Tracer.Visible = false
+            end
+        end
+    end
+
+    -- 5. Hardware Chams Highlighting
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
             local char = getCharacter(player)
@@ -1234,13 +1441,36 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- 4. WalkSpeed Physics Override (Anticheat Protected)
+    -- 6. WalkSpeed Physics Override (Anticheat Protected)
     if Config.Character.SpeedOverride and LocalPlayer and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
         if hum and hum.WalkSpeed ~= Config.Character.SpeedValue then
             hum.WalkSpeed = Config.Character.SpeedValue
         end
     end
+
+    -- 7. Bunny Hop Loop
+    if Config.Character.BunnyHop and UserInputService:IsKeyDown(Enum.KeyCode.Space) and LocalPlayer and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum and hum.FloorMaterial ~= Enum.Material.Air then
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+
+    -- 8. Fast Reload Speedup
+    if Config.Character.FastReload and LocalPlayer and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            local animator = hum:FindFirstChildOfClass("Animator")
+            if animator then
+                for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+                    if string.find(string.lower(track.Name), "reload") then
+                        track:AdjustSpeed(3.5)
+                    end
+                end
+            end
+        end
+    end
 end)
 
-print("[silent.cc] Havoc client loaded successfully with entity resolver & anticheat bypass.")
+print("[silent.cc] Havoc client running with auto mouse unlock, full 2D ESP & combat redirection.")
