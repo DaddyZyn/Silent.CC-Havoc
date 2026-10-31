@@ -118,6 +118,7 @@ local Config = {
         TracerOrigin = "Bottom",
         ShowPlayers = true,
         ShowNpcs = true,
+        BoxColor = Color3.fromRGB(255, 255, 255),
         PlayerBoxColor = Color3.fromRGB(0, 200, 255),
         NpcBoxColor = Color3.fromRGB(255, 170, 0),
         TracerColor = Color3.fromRGB(0, 110, 255),
@@ -170,10 +171,10 @@ local function isLivingCharacter(model)
         return false
     end
 
-    local hrp = model:FindFirstChild("HumanoidRootPart")
-    local head = model:FindFirstChild("Head")
-    if not hrp or not head then return false end
+    local hrp = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+    if not hrp then return false end
 
+    local head = model:FindFirstChild("Head") or hrp
     local hum = model:FindFirstChildOfClass("Humanoid")
     if hum and hum.Health <= 0 then return false end
 
@@ -222,18 +223,19 @@ local function scanEntities()
         end
     end
 
-    -- 1. Direct Workspace Children & 1-level subfolders
-    for _, child in ipairs(Workspace:GetChildren()) do
-        if child:IsA("Model") then
-            checkModel(child)
-        elseif child:IsA("Folder") then
-            for _, sub in ipairs(child:GetChildren()) do
-                if sub:IsA("Model") then
-                    checkModel(sub)
-                end
+    local function scanRecursively(container, depth)
+        if depth > 3 or not container then return end
+        for _, child in ipairs(container:GetChildren()) do
+            if child:IsA("Model") then
+                checkModel(child)
+            elseif child:IsA("Folder") or child:IsA("Configuration") then
+                scanRecursively(child, depth + 1)
             end
         end
     end
+
+    -- 1. Recursive Workspace scanner (resolves dynamic session containers and subfolders)
+    scanRecursively(Workspace, 1)
 
     -- 2. Check Players character models
     for _, p in ipairs(Players:GetPlayers()) do
@@ -1345,6 +1347,9 @@ local BillboardEspPool = {}
 local function createDrawingEsp(model)
     if not hasDrawing then return nil end
 
+    local defaultBoxColor = Config.Esp.PlayerBoxColor or Config.Esp.BoxColor or Color3.fromRGB(0, 200, 255)
+    local defaultTracerColor = Config.Esp.TracerColor or Color3.fromRGB(0, 110, 255)
+
     local espData = {
         BoxOutline = DrawingLib.new("Square"),
         Box = DrawingLib.new("Square"),
@@ -1361,7 +1366,7 @@ local function createDrawingEsp(model)
     espData.BoxOutline.Filled = false
 
     espData.Box.Visible = false
-    espData.Box.Color = Config.Esp.BoxColor
+    espData.Box.Color = defaultBoxColor
     espData.Box.Thickness = 1
     espData.Box.Filled = false
 
@@ -1386,7 +1391,7 @@ local function createDrawingEsp(model)
     espData.Distance.Outline = true
 
     espData.Tracer.Visible = false
-    espData.Tracer.Color = Config.Esp.TracerColor
+    espData.Tracer.Color = defaultTracerColor
     espData.Tracer.Thickness = 1
 
     return espData
@@ -1395,6 +1400,8 @@ end
 local function createBillboardEsp(ent)
     local existing = ent.HRP:FindFirstChild("silent_bb_esp")
     if existing then return existing end
+
+    local defaultBoxColor = (ent and ent.IsPlayer and Config.Esp.PlayerBoxColor) or (ent and Config.Esp.NpcBoxColor) or Config.Esp.BoxColor or Color3.fromRGB(0, 200, 255)
 
     local bb = Instance.new("BillboardGui")
     bb.Name = "silent_bb_esp"
@@ -1417,7 +1424,7 @@ local function createBillboardEsp(ent)
     local boxStroke = Instance.new("UIStroke")
     boxStroke.Name = "Stroke"
     boxStroke.Thickness = 1.5
-    boxStroke.Color = Config.Esp.BoxColor
+    boxStroke.Color = defaultBoxColor
     boxStroke.Parent = boxFrame
 
     local hpBg = Instance.new("Frame")
@@ -1738,7 +1745,7 @@ local function findBestTarget(fovRadius, boneName, wallCheck, maxDist)
     return bestTarget
 end
 
--- Universal Stepped Physics Loop: NoClip & Stamina Lock
+-- Universal Stepped Physics Loop: NoClip, Anticheat Heat Suppressor & Stamina Lock
 RunService.Stepped:Connect(function()
     -- 1. True Physics NoClip (Must run on Stepped to preempt Humanoid collision reset)
     if Config.Character.NoClip and LocalPlayer and LocalPlayer.Character then
@@ -1749,9 +1756,28 @@ RunService.Stepped:Connect(function()
         end
     end
 
-    -- 2. Universal Stamina & Energy Attribute/Value Locker
+    -- 2. Havoc Movement Anticheat Heat Suppressor (Zeroes VelocityHeat, SpeedHeat, FlightHeat)
+    if LocalPlayer and LocalPlayer.Character then
+        local ac = LocalPlayer.Character:FindFirstChild("MovementAnticheat")
+        if ac then
+            for _, heatName in ipairs({ "VelocityHeat", "SpeedHeat", "FlightHeat" }) do
+                local heatVal = ac:FindFirstChild(heatName)
+                if heatVal and heatVal:IsA("NumberValue") and heatVal.Value ~= 0 then
+                    heatVal.Value = 0
+                end
+            end
+        end
+    end
+
+    -- 3. Universal Stamina & Energy Attribute/Value Locker
     if Config.Character.InfiniteStamina and LocalPlayer and LocalPlayer.Character then
         local char = LocalPlayer.Character
+        -- Havoc sprint string attribute ("true" / "false")
+        pcall(function()
+            if char:GetAttribute("sprint") == "false" then
+                char:SetAttribute("sprint", "true")
+            end
+        end)
         -- Attributes
         for _, attr in ipairs({ "Stamina", "stamina", "Energy", "energy", "Sprint", "sprint" }) do
             local val = char:GetAttribute(attr)
@@ -1763,7 +1789,7 @@ RunService.Stepped:Connect(function()
         for _, child in ipairs(char:GetDescendants()) do
             if child:IsA("NumberValue") or child:IsA("IntValue") then
                 local lower = string.lower(child.Name)
-                if string.find(lower, "stamina") or string.find(lower, "energy") or string.find(lower, "sprint") then
+                if string.find(lower, "stamina") or string.find(lower, "energy") then
                     if child.Value < 100 then child.Value = 100 end
                 end
             end
@@ -1922,14 +1948,19 @@ RunService.RenderStepped:Connect(function()
                 end
 
                 local rendered = false
-                if Config.Esp.Enabled and inRange and allowEntity then
-                    local hrpPos, hrpOn = Camera:WorldToViewportPoint(hrp.Position)
-                    local headPos, headOn = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.6, 0))
-                    local rootPos, rootOn = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3, 0))
+                if esp and Config.Esp.Enabled and inRange and allowEntity then
+                    local headObj = head or hrp
+                    local head3D = (headObj and headObj.Position) and (headObj.Position + Vector3.new(0, 0.6, 0)) or (hrp.Position + Vector3.new(0, 2, 0))
+                    local root3D = hrp.Position - Vector3.new(0, 3, 0)
 
-                    if hrpOn and headOn and rootOn and hrpPos.Z > 0 then
+                    local hrpPos, hrpOn = Camera:WorldToViewportPoint(hrp.Position)
+                    local headPos, headOn = Camera:WorldToViewportPoint(head3D)
+                    local rootPos, rootOn = Camera:WorldToViewportPoint(root3D)
+
+                    if hrpPos.Z > 0 and (hrpOn or headOn or rootOn) then
                         local height = math.abs(headPos.Y - rootPos.Y)
-                        local width = math.clamp(height * 0.65, 4, 300)
+                        if height < 6 then height = 24 end
+                        local width = math.clamp(height * 0.65, 6, 400)
                         local boxPos = Vector2.new(hrpPos.X - width / 2, headPos.Y)
 
                         if Config.Esp.Boxes then
@@ -1939,7 +1970,7 @@ RunService.RenderStepped:Connect(function()
 
                             esp.Box.Size = Vector2.new(width, height)
                             esp.Box.Position = boxPos
-                            esp.Box.Color = activeColor
+                            esp.Box.Color = activeColor or Color3.fromRGB(0, 200, 255)
                             esp.Box.Visible = true
                         else
                             esp.BoxOutline.Visible = false
@@ -1983,7 +2014,7 @@ RunService.RenderStepped:Connect(function()
                         if Config.Esp.Tracers then
                             esp.Tracer.From = tracerOrigin
                             esp.Tracer.To = Vector2.new(hrpPos.X, rootPos.Y)
-                            esp.Tracer.Color = Config.Esp.TracerColor
+                            esp.Tracer.Color = Config.Esp.TracerColor or Color3.fromRGB(0, 110, 255)
                             esp.Tracer.Visible = true
                         else
                             esp.Tracer.Visible = false
@@ -1993,7 +2024,7 @@ RunService.RenderStepped:Connect(function()
                     end
                 end
 
-                if not rendered then
+                if esp and not rendered then
                     esp.BoxOutline.Visible = false
                     esp.Box.Visible = false
                     esp.HealthBarOutline.Visible = false

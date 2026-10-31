@@ -3,8 +3,8 @@
     Bypasses Fastly CDN cache locks & surfaces compile diagnostics
 ]]
 
-local timestamp = tostring(math.floor(os.time() / 15))
-local url = "https://raw.githubusercontent.com/DaddyZyn/Silent.CC-Havoc/main/dist/silent_cc.luau?t=" .. timestamp
+local timestamp = tostring(os.time()) .. "_" .. tostring(math.random(100000, 999999))
+local url = "https://raw.githubusercontent.com/DaddyZyn/Silent.CC-Havoc/main/dist/silent_cc.luau?v=" .. timestamp
 
 local success, source = pcall(function()
     return game:HttpGet(url, true)
