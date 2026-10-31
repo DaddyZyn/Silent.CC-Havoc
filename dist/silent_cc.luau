@@ -115,15 +115,20 @@ local Config = {
         Names = false,
         Distances = false,
         Tracers = false,
+        HeadDot = false,
         TracerOrigin = "Bottom",
         ShowPlayers = true,
         ShowNpcs = true,
         BoxColor = Color3.fromRGB(255, 255, 255),
-        PlayerBoxColor = Color3.fromRGB(0, 200, 255),
-        NpcBoxColor = Color3.fromRGB(255, 170, 0),
-        TracerColor = Color3.fromRGB(0, 110, 255),
+        PlayerBoxColor = Color3.fromRGB(255, 255, 255), -- Monochrome Pure White
+        NpcBoxColor = Color3.fromRGB(150, 150, 160),    -- Monochrome Slate Gray
+        TracerColor = Color3.fromRGB(240, 240, 245),
         MaxDistance = 2000,
         Engine = "Auto (Dual Layer)",
+    },
+    Items = {
+        SelectedWeapon = "870 MCS",
+        SelectedId = "172",
     },
     Loot = {
         Enabled = false,
@@ -136,9 +141,15 @@ local Config = {
     },
     Visuals = {
         Chams = false,
-        VisibleColor = Color3.fromRGB(120, 87, 255),
-        HiddenColor = Color3.fromRGB(255, 60, 60),
+        VisibleColor = Color3.fromRGB(230, 230, 230),
+        HiddenColor = Color3.fromRGB(120, 120, 120),
         Transparency = 0,
+    },
+    ItemSpawner = {
+        SelectedCategory = "Weapons",
+        SelectedItem = "M18",
+        SpawnMethod = "InventoryEvent",
+        Amount = 1,
     },
     Character = {
         SpeedOverride = false,
@@ -420,39 +431,137 @@ if typeof(hookfn) == "function" and typeof(Workspace.Raycast) == "function" then
 end
 
 -- =========================================================================
--- SECTION 6: UI FRAMEWORK (LAYOUT-ORDER IMMUNE)
+
+-- =========================================================================
+-- SECTION 5B: HAVOC ITEM SPONSOR & REPLICATION EXECUTOR
+-- =========================================================================
+local ItemDatabase = {
+    Weapons = { "M18", "DesertEagle", "AK47", "M4A1", "MP5", "Remington870", "AWM", "Glock17" },
+    Containers = { "WeaponCrate", "LootBox", "SafeSmall", "SafeLarge", "AirdropCrate" },
+    Medical = { "WhiteMedkit", "Bandage", "Morphine", "Splint" },
+    Gears = { "AltynHelmet", "Tier4Armor", "TacticalBackpack", "NightVisionGoggles" },
+}
+
+pcall(function()
+    local libWeapons = ReplicatedStorage:FindFirstChild("Storage")
+    if libWeapons then
+        local wMod = libWeapons:FindFirstChild("Modules")
+        if wMod then
+            local wepFolder = wMod:FindFirstChild("Weapons")
+            if wepFolder then
+                local found = {}
+                for _, w in ipairs(wepFolder:GetChildren()) do
+                    if w:IsA("ModuleScript") then
+                        table.insert(found, w.Name)
+                    end
+                end
+                if #found > 0 then ItemDatabase.Weapons = found end
+            end
+        end
+    end
+end)
+
+local function attemptSpawnItem(itemName, method)
+    method = method or Config.ItemSpawner.SpawnMethod
+    local success = false
+    local detail = ""
+
+    -- Pipeline 1: InventoryEvent direct injection
+    if method == "InventoryEvent" or method == "All Pipelines" then
+        pcall(function()
+            local invEvent = ReplicatedStorage:FindFirstChild("Storage")
+            if invEvent then
+                local events = invEvent:FindFirstChild("Events")
+                if events then
+                    local ev = events:FindFirstChild("InventoryEvent")
+                    if ev and ev:IsA("RemoteEvent") then
+                        ev:FireServer("Equip", itemName, 1)
+                        ev:FireServer("Pickup", itemName, 1)
+                        ev:FireServer("Add", itemName, 1)
+                        success = true
+                        detail = "Fired ReplicatedStorage.Storage.Events.InventoryEvent (Equip/Add)"
+                    end
+                end
+            end
+        end)
+    end
+
+    -- Pipeline 2: TraderStashRequest replication
+    if method == "TraderStashRequest" or method == "All Pipelines" then
+        pcall(function()
+            local stashReq = ReplicatedStorage:FindFirstChild("TraderStashRequest")
+            if stashReq and stashReq:IsA("RemoteFunction") then
+                task.spawn(function()
+                    pcall(function() stashReq:InvokeServer("Withdraw", itemName, 1) end)
+                    pcall(function() stashReq:InvokeServer("Buy", itemName, 1) end)
+                end)
+                success = true
+                detail = detail .. " | Invoked TraderStashRequest"
+            end
+        end)
+    end
+
+    -- Pipeline 3: Client In-Memory Tool Injection (Equips locally to character rig)
+    if method == "Client Memory Injection" or method == "All Pipelines" then
+        pcall(function()
+            if LocalPlayer and LocalPlayer.Character then
+                local tool = Instance.new("Tool")
+                tool.Name = itemName
+                tool.RequiresHandle = false
+                local handle = Instance.new("Part")
+                handle.Name = "Handle"
+                handle.Size = Vector3.new(1, 1, 3)
+                handle.Transparency = 1
+                handle.CanCollide = false
+                handle.Parent = tool
+                tool.Parent = LocalPlayer.Character
+                success = true
+                detail = detail .. " | Created local Tool rig"
+            end
+        end)
+    end
+
+    return success, detail
+end
+
+-- SECTION 6: UI FRAMEWORK (VERTICAL SIDEBAR MONOCHROME)
 -- =========================================================================
 local Library = {}
 Library.Theme = {
-    WindowBg = Color3.fromRGB(14, 14, 16),
+    WindowBg = Color3.fromRGB(13, 13, 15),
     WindowBorder = Color3.fromRGB(0, 0, 0),
-    WindowStroke = Color3.fromRGB(36, 36, 42),
+    WindowStroke = Color3.fromRGB(28, 28, 32),
 
-    TitlebarBg = Color3.fromRGB(12, 12, 14),
-    TitlebarText = Color3.fromRGB(210, 210, 215),
+    SidebarBg = Color3.fromRGB(10, 10, 12),
+    SidebarBorder = Color3.fromRGB(24, 24, 28),
 
-    NavbarBg = Color3.fromRGB(14, 14, 16),
-    TabActiveBg = Color3.fromRGB(22, 22, 26),
-    TabActiveBorder = Color3.fromRGB(50, 50, 60),
-    TabInactiveText = Color3.fromRGB(130, 130, 140),
+    TitlebarBg = Color3.fromRGB(10, 10, 12),
+    TitlebarText = Color3.fromRGB(240, 240, 245),
+
+    NavbarBg = Color3.fromRGB(10, 10, 12),
+    TabActiveBg = Color3.fromRGB(22, 22, 25),
+    TabActiveBorder = Color3.fromRGB(45, 45, 52),
+    TabInactiveText = Color3.fromRGB(120, 120, 130),
     TabActiveText = Color3.fromRGB(255, 255, 255),
 
-    Accent = Color3.fromRGB(0, 110, 255),
-    AccentSecondary = Color3.fromRGB(120, 87, 255),
+    Accent = Color3.fromRGB(230, 230, 235), -- Crisp Monochrome
+    AccentDim = Color3.fromRGB(160, 160, 170),
+    AccentSecondary = Color3.fromRGB(180, 180, 190),
 
-    GroupboxBg = Color3.fromRGB(16, 16, 20),
-    GroupboxBorder = Color3.fromRGB(32, 32, 38),
-    GroupboxTitle = Color3.fromRGB(220, 220, 225),
+    GroupboxBg = Color3.fromRGB(15, 15, 18),
+    GroupboxBorder = Color3.fromRGB(28, 28, 33),
+    GroupboxTitle = Color3.fromRGB(225, 225, 230),
 
-    LabelText = Color3.fromRGB(190, 190, 198),
-    MutedText = Color3.fromRGB(110, 110, 120),
+    LabelText = Color3.fromRGB(195, 195, 202),
+    MutedText = Color3.fromRGB(115, 115, 125),
+    WarnText = Color3.fromRGB(255, 90, 90),
 
     InputBg = Color3.fromRGB(10, 10, 12),
-    InputBorder = Color3.fromRGB(38, 38, 46),
+    InputBorder = Color3.fromRGB(32, 32, 38),
 
-    SliderTrack = Color3.fromRGB(12, 12, 15),
-    SliderFill = Color3.fromRGB(0, 110, 255),
-    SliderText = Color3.fromRGB(255, 255, 255),
+    SliderTrack = Color3.fromRGB(18, 18, 22),
+    SliderFill = Color3.fromRGB(220, 220, 225),
+    SliderText = Color3.fromRGB(245, 245, 250),
 }
 
 local function getSafeParent()
@@ -531,26 +640,105 @@ function Library.CreateWindow(config)
     windowStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     windowStroke.Parent = mainFrame
 
+    -- Vertical Sidebar Layout (havoc.dead style)
+    local sidebar = Instance.new("Frame")
+    sidebar.Name = "Sidebar"
+    sidebar.Size = UDim2.new(0, 150, 1, 0)
+    sidebar.Position = UDim2.new(0, 0, 0, 0)
+    sidebar.BackgroundColor3 = Library.Theme.SidebarBg
+    sidebar.BorderSizePixel = 0
+    sidebar.Parent = mainFrame
+
+    local sidebarBorder = Instance.new("Frame")
+    sidebarBorder.Name = "SidebarBorder"
+    sidebarBorder.Size = UDim2.new(0, 1, 1, 0)
+    sidebarBorder.Position = UDim2.new(1, -1, 0, 0)
+    sidebarBorder.BackgroundColor3 = Library.Theme.SidebarBorder
+    sidebarBorder.BorderSizePixel = 0
+    sidebarBorder.Parent = sidebar
+
     local titleBar = Instance.new("Frame")
     titleBar.Name = "TitleBar"
-    titleBar.Size = UDim2.new(1, 0, 0, 28)
-    titleBar.BackgroundColor3 = Library.Theme.TitlebarBg
-    titleBar.BorderSizePixel = 0
-    titleBar.Parent = mainFrame
+    titleBar.Size = UDim2.new(1, 0, 0, 48)
+    titleBar.BackgroundTransparency = 1
+    titleBar.Parent = sidebar
 
     local titleLabel = Instance.new("TextLabel")
     titleLabel.Name = "TitleLabel"
     titleLabel.Size = UDim2.new(1, -20, 1, 0)
-    titleLabel.Position = UDim2.new(0, 12, 0, 0)
+    titleLabel.Position = UDim2.new(0, 18, 0, 0)
     titleLabel.BackgroundTransparency = 1
-    titleLabel.Font = Enum.Font.RobotoMono
-    titleLabel.TextSize = 12
+    titleLabel.Font = Enum.Font.SourceSansItalic
+    titleLabel.TextSize = 17
     titleLabel.TextColor3 = Library.Theme.TitlebarText
     titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    titleLabel.Text = string.format("%s  |  %s  |  %s", title, gameName, link)
+    titleLabel.Text = "havoc.dead"
     titleLabel.Parent = titleBar
 
     makeDraggable(titleBar, mainFrame)
+
+    local navBar = Instance.new("Frame")
+    navBar.Name = "NavList"
+    navBar.Size = UDim2.new(1, -16, 1, -110)
+    navBar.Position = UDim2.new(0, 10, 0, 52)
+    navBar.BackgroundTransparency = 1
+    navBar.Parent = sidebar
+
+    local navLayout = Instance.new("UIListLayout")
+    navLayout.FillDirection = Enum.FillDirection.Vertical
+    navLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+    navLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+    navLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    navLayout.Padding = UDim.new(0, 3)
+    navLayout.Parent = navBar
+
+    -- User profile card at sidebar bottom
+    local profileCard = Instance.new("Frame")
+    profileCard.Name = "ProfileCard"
+    profileCard.Size = UDim2.new(1, -16, 0, 44)
+    profileCard.Position = UDim2.new(0, 8, 1, -50)
+    profileCard.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+    profileCard.BorderSizePixel = 0
+    profileCard.Parent = sidebar
+
+    local pStroke = Instance.new("UIStroke")
+    pStroke.Color = Color3.fromRGB(30, 30, 35)
+    pStroke.Thickness = 1
+    pStroke.Parent = profileCard
+
+    local pCorner = Instance.new("UICorner")
+    pCorner.CornerRadius = UDim.new(0, 4)
+    pCorner.Parent = profileCard
+
+    local userAvatar = Instance.new("ImageLabel")
+    userAvatar.Name = "Avatar"
+    userAvatar.Size = UDim2.new(0, 30, 0, 30)
+    userAvatar.Position = UDim2.new(0, 7, 0.5, -15)
+    userAvatar.BackgroundTransparency = 1
+    userAvatar.Image = "rbxasset://textures/ui/GuiImagePlaceholder.png"
+    pcall(function()
+        if LocalPlayer then
+            userAvatar.Image = string.format("https://www.roblox.com/headshot-thumbnail/image?userId=%d&width=48&height=48&format=png", LocalPlayer.UserId)
+        end
+    end)
+    userAvatar.Parent = profileCard
+
+    local avCorner = Instance.new("UICorner")
+    avCorner.CornerRadius = UDim.new(0, 4)
+    avCorner.Parent = userAvatar
+
+    local userLabel = Instance.new("TextLabel")
+    userLabel.Name = "UserLabel"
+    userLabel.Size = UDim2.new(1, -44, 1, 0)
+    userLabel.Position = UDim2.new(0, 42, 0, 0)
+    userLabel.BackgroundTransparency = 1
+    userLabel.Font = Enum.Font.RobotoMono
+    userLabel.TextSize = 10
+    userLabel.TextColor3 = Library.Theme.LabelText
+    userLabel.TextXAlignment = Enum.TextXAlignment.Left
+    userLabel.TextTruncate = Enum.TextTruncate.AtEnd
+    userLabel.Text = LocalPlayer and ("@" .. LocalPlayer.Name) or "@user"
+    userLabel.Parent = profileCard
 
     local function setVisibility(visible)
         isMenuVisible = visible
@@ -567,36 +755,14 @@ function Library.CreateWindow(config)
         end
     end)
 
-    local navBar = Instance.new("Frame")
-    navBar.Name = "NavBar"
-    navBar.Size = UDim2.new(1, -20, 0, 30)
-    navBar.Position = UDim2.new(0, 10, 0, 30)
-    navBar.BackgroundColor3 = Library.Theme.NavbarBg
-    navBar.BorderSizePixel = 0
-    navBar.Parent = mainFrame
-
-    local navLayout = Instance.new("UIListLayout")
-    navLayout.FillDirection = Enum.FillDirection.Horizontal
-    navLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-    navLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-    navLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    navLayout.Padding = UDim.new(0, 6)
-    navLayout.Parent = navBar
-
-    local navAccentLine = Instance.new("Frame")
-    navAccentLine.Name = "NavAccentLine"
-    navAccentLine.Size = UDim2.new(1, -20, 0, 1)
-    navAccentLine.Position = UDim2.new(0, 10, 0, 62)
-    navAccentLine.BackgroundColor3 = Library.Theme.Accent
-    navAccentLine.BorderSizePixel = 0
-    navAccentLine.Parent = mainFrame
-
     local contentArea = Instance.new("Frame")
     contentArea.Name = "ContentArea"
-    contentArea.Size = UDim2.new(1, -20, 1, -72)
-    contentArea.Position = UDim2.new(0, 10, 0, 66)
+    contentArea.Size = UDim2.new(1, -165, 1, -16)
+    contentArea.Position = UDim2.new(0, 158, 0, 8)
     contentArea.BackgroundTransparency = 1
     contentArea.Parent = mainFrame
+
+    makeDraggable(contentArea, mainFrame)
 
     local Window = {
         ScreenGui = screenGui,
@@ -610,14 +776,15 @@ function Library.CreateWindow(config)
 
         local tabBtn = Instance.new("TextButton")
         tabBtn.Name = string.format("Tab_%02d_%s", tabIndex, tabName)
-        tabBtn.Size = UDim2.new(0, 85, 0, 24)
+        tabBtn.Size = UDim2.new(1, 0, 0, 26)
         tabBtn.LayoutOrder = tabIndex
-        tabBtn.BackgroundColor3 = Library.Theme.NavbarBg
+        tabBtn.BackgroundTransparency = 1
         tabBtn.BorderSizePixel = 0
-        tabBtn.Font = Enum.Font.RobotoMono
-        tabBtn.TextSize = 12
+        tabBtn.Font = Enum.Font.SourceSansItalic
+        tabBtn.TextSize = 14
         tabBtn.TextColor3 = Library.Theme.TabInactiveText
-        tabBtn.Text = tabName
+        tabBtn.TextXAlignment = Enum.TextXAlignment.Left
+        tabBtn.Text = "  " .. tabName
         tabBtn.AutoButtonColor = false
         tabBtn.Parent = navBar
 
@@ -687,11 +854,11 @@ function Library.CreateWindow(config)
             for _, t in ipairs(Window.Tabs) do
                 t.Content.Visible = false
                 t.Stroke.Enabled = false
-                t.Button.BackgroundColor3 = Library.Theme.NavbarBg
+                t.Button.BackgroundTransparency = 1
                 t.Button.TextColor3 = Library.Theme.TabInactiveText
             end
             tabData.Content.Visible = true
-            tabData.Stroke.Enabled = true
+            tabData.Button.BackgroundTransparency = 0
             tabData.Button.BackgroundColor3 = Library.Theme.TabActiveBg
             tabData.Button.TextColor3 = Library.Theme.TabActiveText
             Window.CurrentTab = tabData
@@ -1256,6 +1423,24 @@ function Library.CreateWindow(config)
                 }
             end
 
+            function Group:AddLabel(label)
+                local order = nextOrder()
+                local lbl = Instance.new("TextLabel")
+                lbl.Name = string.format("%03d_Lbl", order)
+                lbl.LayoutOrder = order
+                lbl.Size = UDim2.new(1, 0, 0, 18)
+                lbl.AutomaticSize = Enum.AutomaticSize.Y
+                lbl.BackgroundTransparency = 1
+                lbl.Font = Enum.Font.RobotoMono
+                lbl.TextSize = 10
+                lbl.TextColor3 = Library.Theme.MutedText
+                lbl.TextXAlignment = Enum.TextXAlignment.Left
+                lbl.TextWrapped = true
+                lbl.Text = label
+                lbl.Parent = itemsContainer
+                return lbl
+            end
+
             function Group:AddButton(label, callback)
                 local order = nextOrder()
                 local btn = Instance.new("TextButton")
@@ -1358,6 +1543,7 @@ local function createDrawingEsp(model)
         Name = DrawingLib.new("Text"),
         Distance = DrawingLib.new("Text"),
         Tracer = DrawingLib.new("Line"),
+        HeadDot = DrawingLib.new("Circle"),
     }
 
     espData.BoxOutline.Visible = false
@@ -1393,6 +1579,11 @@ local function createDrawingEsp(model)
     espData.Tracer.Visible = false
     espData.Tracer.Color = defaultTracerColor
     espData.Tracer.Thickness = 1
+
+    espData.HeadDot.Visible = false
+    espData.HeadDot.Radius = 3.5
+    espData.HeadDot.Filled = true
+    espData.HeadDot.Color = defaultBoxColor
 
     return espData
 end
@@ -1633,6 +1824,7 @@ WorldGroup:AddColorPicker("Crate / Safe Color", Config.Loot.ContainerColor, func
 local CharTab = Window:CreateTab("Character")
 
 local MovementGroup = CharTab:CreateGroupbox("Movement", "Left")
+MovementGroup:AddLabel("[!] NOTE: Movement speed >20.4 studs/s & high fly risk server rubberbands.")
 MovementGroup:AddToggle("Anti-Fall Damage (Safe Land)", Config.Character.AntiFallDamage, { Callback = function(v) Config.Character.AntiFallDamage = v end })
 MovementGroup:AddToggle("NoClip (Walk Through Walls)", Config.Character.NoClip, { Callback = function(v) Config.Character.NoClip = v end })
 MovementGroup:AddToggle("WalkSpeed Override", Config.Character.SpeedOverride, {
@@ -1673,8 +1865,78 @@ WeaponGroup:AddToggle("Fast Tactical Reload", Config.Character.FastReload, { Cal
 WeaponGroup:AddToggle("Recoil Neutralizer", Config.Character.NoRecoil, { Callback = function(v) Config.Character.NoRecoil = v end })
 WeaponGroup:AddToggle("Spread Reduction", Config.Character.NoSpread, { Callback = function(v) Config.Character.NoSpread = v end })
 
--- TAB 5: SETTINGS
-local SettingsTab = Window:CreateTab("settings")
+-- TAB 5: ITEM SPAWNER
+local SpawnerTab = Window:CreateTab("Spawner")
+
+local SpawnControlGroup = SpawnerTab:CreateGroupbox("Item Dispatcher", "Left")
+local spawnStatusLabel = nil
+
+local itemDropdownHolder = nil
+SpawnControlGroup:AddDropdown("Item Category", { "Weapons", "Containers", "Medical", "Gears" }, Config.ItemSpawner.SelectedCategory, function(cat)
+    Config.ItemSpawner.SelectedCategory = cat
+    local items = ItemDatabase[cat] or ItemDatabase.Weapons
+    Config.ItemSpawner.SelectedItem = items[1] or ""
+    if itemDropdownHolder and itemDropdownHolder.SetOptions then
+        itemDropdownHolder.SetOptions(items, Config.ItemSpawner.SelectedItem)
+    end
+end)
+
+itemDropdownHolder = SpawnControlGroup:AddDropdown("Select Item", ItemDatabase.Weapons, Config.ItemSpawner.SelectedItem, function(it)
+    Config.ItemSpawner.SelectedItem = it
+end)
+
+SpawnControlGroup:AddDropdown("Injection Pipeline", { "All Pipelines", "InventoryEvent", "TraderStashRequest", "Client Memory Injection" }, Config.ItemSpawner.SpawnMethod, function(m)
+    Config.ItemSpawner.SpawnMethod = m
+end)
+
+SpawnControlGroup:AddButton("SPAWN / EQUIP SELECTED ITEM", function()
+    local item = Config.ItemSpawner.SelectedItem
+    local method = Config.ItemSpawner.SpawnMethod
+    local success, detail = attemptSpawnItem(item, method)
+    if spawnStatusLabel then
+        if success then
+            spawnStatusLabel.Text = "[+] Dispatched: " .. tostring(item) .. "\n" .. tostring(detail)
+            spawnStatusLabel.TextColor3 = Color3.fromRGB(180, 255, 180)
+        else
+            spawnStatusLabel.Text = "[-] Failed to dispatch item: " .. tostring(item)
+            spawnStatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+        end
+    end
+end)
+
+spawnStatusLabel = SpawnControlGroup:AddLabel("[i] Ready to dispatch items via Havoc remotes.")
+
+local QuickSpawnGroup = SpawnerTab:CreateGroupbox("Quick Preset Guns", "Right")
+QuickSpawnGroup:AddButton("Spawn M18 Rifle", function()
+    attemptSpawnItem("M18", "All Pipelines")
+end)
+QuickSpawnGroup:AddButton("Spawn Desert Eagle", function()
+    attemptSpawnItem("DesertEagle", "All Pipelines")
+end)
+QuickSpawnGroup:AddButton("Spawn AK47", function()
+    attemptSpawnItem("AK47", "All Pipelines")
+end)
+QuickSpawnGroup:AddButton("Spawn M4A1", function()
+    attemptSpawnItem("M4A1", "All Pipelines")
+end)
+QuickSpawnGroup:AddButton("Spawn Altyn Helmet", function()
+    attemptSpawnItem("AltynHelmet", "All Pipelines")
+end)
+QuickSpawnGroup:AddButton("Spawn White Medkit", function()
+    attemptSpawnItem("WhiteMedkit", "All Pipelines")
+end)
+
+-- TAB 6: CREDITS
+local CreditsTab = Window:CreateTab("Credits")
+local CreditsGroup = CreditsTab:CreateGroupbox("Credits & Info", "Left")
+CreditsGroup:AddLabel("havoc.dead // silent.cc suite")
+CreditsGroup:AddLabel("Game: Havoc (Extraction Shooter)")
+CreditsGroup:AddLabel("Interface: Pitch Monochrome Obsidian")
+CreditsGroup:AddLabel("Author: cook45 & clack")
+CreditsGroup:AddLabel("Status: Active")
+
+-- TAB 7: SETTINGS
+local SettingsTab = Window:CreateTab("Settings")
 
 local ProfileGroup = SettingsTab:CreateGroupbox("Profile Manager", "Left")
 ProfileGroup:AddButton("Save Default Config", function() print("[silent.cc] Saved config profile.") end)
@@ -2020,10 +2282,18 @@ RunService.RenderStepped:Connect(function()
                         if Config.Esp.Tracers then
                             esp.Tracer.From = tracerOrigin
                             esp.Tracer.To = Vector2.new(hrpPos.X, rootPos.Y)
-                            esp.Tracer.Color = Config.Esp.TracerColor or Color3.fromRGB(0, 110, 255)
+                            esp.Tracer.Color = Config.Esp.TracerColor or Color3.fromRGB(240, 240, 245)
                             esp.Tracer.Visible = true
                         else
                             esp.Tracer.Visible = false
+                        end
+
+                        if Config.Esp.HeadDot and headOn and headPos.Z > 0 then
+                            esp.HeadDot.Position = Vector2.new(headPos.X, headPos.Y)
+                            esp.HeadDot.Color = activeColor or Color3.fromRGB(255, 255, 255)
+                            esp.HeadDot.Visible = true
+                        else
+                            esp.HeadDot.Visible = false
                         end
 
                         rendered = true
@@ -2038,6 +2308,7 @@ RunService.RenderStepped:Connect(function()
                     esp.Name.Visible = false
                     esp.Distance.Visible = false
                     esp.Tracer.Visible = false
+                    esp.HeadDot.Visible = false
                 end
             end
 
