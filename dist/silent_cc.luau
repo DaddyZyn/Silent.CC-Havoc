@@ -177,18 +177,23 @@ local function isLivingCharacter(model)
     if not model or not model:IsA("Model") then return false end
     if LocalPlayer and LocalPlayer.Character and model == LocalPlayer.Character then return false end
 
-    -- Havoc dead ragdoll detection
-    if model:FindFirstChild("ClientRagdoll") or model:FindFirstChild("ClientRagdollV1") then
+    -- Havoc dead ragdoll, death frame, or downed state detection
+    if model:FindFirstChild("ClientRagdoll") or model:FindFirstChild("ClientRagdollV1") or model:FindFirstChild("Ragdoll") then
+        return false
+    end
+    if model:GetAttribute("Dead") == true or model:GetAttribute("dead") == "true" or model:GetAttribute("IsDead") == true then
         return false
     end
 
     local hrp = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
-    if not hrp then return false end
+    if not hrp or not hrp.Parent then return false end
+
+    local hum = model:FindFirstChildOfClass("Humanoid")
+    if hum and (hum.Health <= 0 or hum:GetState() == Enum.HumanoidStateType.Dead) then
+        return false
+    end
 
     local head = model:FindFirstChild("Head") or hrp
-    local hum = model:FindFirstChildOfClass("Humanoid")
-    if hum and hum.Health <= 0 then return false end
-
     return true, hrp, head, hum
 end
 
@@ -2145,7 +2150,8 @@ RunService.RenderStepped:Connect(function()
     local useBillboard = (Config.Esp.Engine == "Auto (Dual Layer)" or Config.Esp.Engine == "Billboard (Native)" or not hasDrawing)
 
     for model, ent in pairs(ActiveEntities) do
-        if not model.Parent or not ent.HRP.Parent or (ent.Humanoid and ent.Humanoid.Health <= 0) then
+        local isAlive = isLivingCharacter(model)
+        if not isAlive or not model.Parent or not ent.HRP.Parent then
             cleanupModelEsp(model)
             ActiveEntities[model] = nil
         else
@@ -2225,10 +2231,12 @@ RunService.RenderStepped:Connect(function()
                     local headPos, headOn = Camera:WorldToViewportPoint(head3D)
                     local rootPos, rootOn = Camera:WorldToViewportPoint(root3D)
 
-                    if hrpPos.Z > 0 and (hrpOn or headOn or rootOn) then
-                        local height = math.abs(headPos.Y - rootPos.Y)
-                        if height < 6 then height = 24 end
-                        local width = math.clamp(height * 0.65, 6, 400)
+                    -- Frustum Culling: discard points behind camera or with near-plane projection blowouts
+                    if hrpPos.Z > 1.5 and headPos.Z > 1.5 and rootPos.Z > 1.5 and (hrpOn or headOn or rootOn) then
+                        local rawHeight = math.abs(headPos.Y - rootPos.Y)
+                        local maxScreenHeight = Camera.ViewportSize.Y * 0.85
+                        local height = math.clamp(rawHeight, 8, maxScreenHeight)
+                        local width = math.clamp(height * 0.62, 6, Camera.ViewportSize.X * 0.5)
                         local boxPos = Vector2.new(hrpPos.X - width / 2, headPos.Y)
 
                         if Config.Esp.Boxes then
@@ -2334,48 +2342,57 @@ RunService.RenderStepped:Connect(function()
     -- 4B. World Loot ESP Render Loop
     if Config.Loot.Enabled then
         for inst, loot in pairs(ActiveLoot) do
-            if not inst.Parent then
+            if not inst or not inst.Parent then
+                local oldBb = inst and inst:FindFirstChild("silent_loot_bb")
+                if oldBb then pcall(function() oldBb:Destroy() end) end
                 ActiveLoot[inst] = nil
             else
                 local dist = (loot.Position - Camera.CFrame.Position).Magnitude
-                if dist <= Config.Loot.MaxDistance then
-                    local showItem = (loot.IsContainer and Config.Loot.Containers) or (not loot.IsContainer and Config.Loot.Weapons)
-                    if showItem then
-                        local screen3D, onScreen = Camera:WorldToViewportPoint(loot.Position)
-                        if onScreen and screen3D.Z > 0 then
-                            -- Native BillboardGui for Loot
-                            local lootBb = inst:FindFirstChild("silent_loot_bb")
-                            if not lootBb then
-                                lootBb = Instance.new("BillboardGui")
-                                lootBb.Name = "silent_loot_bb"
-                                lootBb.AlwaysOnTop = true
-                                lootBb.ClipsDescendants = false
-                                lootBb.Size = UDim2.new(0, 150, 0, 26)
-                                lootBb.Adornee = inst:IsA("Model") and (inst.PrimaryPart or inst:FindFirstChildOfClass("BasePart")) or inst
-                                lootBb.Parent = inst
+                local showItem = (loot.IsContainer and Config.Loot.Containers) or (not loot.IsContainer and Config.Loot.Weapons)
+                local lootBb = inst:FindFirstChild("silent_loot_bb")
 
-                                local lbl = Instance.new("TextLabel")
-                                lbl.Name = "LootLabel"
-                                lbl.Size = UDim2.new(1, 0, 1, 0)
-                                lbl.BackgroundTransparency = 1
-                                lbl.Font = Enum.Font.RobotoMono
-                                lbl.TextSize = 10
-                                lbl.TextStrokeTransparency = 0.2
-                                lbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-                                lbl.Parent = lootBb
-                            end
+                if dist <= Config.Loot.MaxDistance and showItem then
+                    local screen3D, onScreen = Camera:WorldToViewportPoint(loot.Position)
+                    if onScreen and screen3D.Z > 1.0 then
+                        if not lootBb then
+                            lootBb = Instance.new("BillboardGui")
+                            lootBb.Name = "silent_loot_bb"
+                            lootBb.AlwaysOnTop = true
+                            lootBb.ClipsDescendants = false
+                            lootBb.Size = UDim2.new(0, 160, 0, 22)
+                            lootBb.Adornee = inst:IsA("Model") and (inst.PrimaryPart or inst:FindFirstChildOfClass("BasePart")) or inst
+                            lootBb.Parent = inst
 
-                            lootBb.Enabled = true
-                            local lbl = lootBb:FindFirstChild("LootLabel")
-                            if lbl then
-                                local col = loot.IsContainer and Config.Loot.ContainerColor or Config.Loot.ItemColor
-                                lbl.TextColor3 = col
-                                lbl.Text = string.format("%s%s [%dm]", loot.IsContainer and "[CRATE] " or "[LOOT] ", loot.Name, math.floor(dist))
-                            end
+                            local lbl = Instance.new("TextLabel")
+                            lbl.Name = "LootLabel"
+                            lbl.Size = UDim2.new(1, 0, 1, 0)
+                            lbl.BackgroundTransparency = 1
+                            lbl.Font = Enum.Font.RobotoMono
+                            lbl.TextSize = 10
+                            lbl.TextStrokeTransparency = 0.2
+                            lbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+                            lbl.Parent = lootBb
                         end
+
+                        lootBb.Enabled = true
+                        local lbl = lootBb:FindFirstChild("LootLabel")
+                        if lbl then
+                            local col = loot.IsContainer and Config.Loot.ContainerColor or Config.Loot.ItemColor
+                            lbl.TextColor3 = col
+                            lbl.Text = string.format("%s%s [%dm]", loot.IsContainer and "[CRATE] " or "[LOOT] ", loot.Name, math.floor(dist))
+                        end
+                    else
+                        if lootBb then lootBb.Enabled = false end
                     end
+                else
+                    if lootBb then lootBb.Enabled = false end
                 end
             end
+        end
+    else
+        for inst, _ in pairs(ActiveLoot) do
+            local lootBb = inst and inst:FindFirstChild("silent_loot_bb")
+            if lootBb then lootBb.Enabled = false end
         end
     end
 
