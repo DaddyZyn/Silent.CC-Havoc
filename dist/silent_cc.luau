@@ -1,8 +1,10 @@
 --[[
     silent.cc | Havoc [Season 2] | discord.gg/silentcc
-    Full Operational Build:
-    - Auto Mouse Unlock: Automatically releases mouse lock & enables cursor whenever menu is open (No ESC required)
-    - Full 2D Drawing ESP Pool: Boxes, Box Outlines, Dynamic Health Bars, Distance tags, Player Names, Snapline Tracers
+    Full Operational Client:
+    - Safe Global Environment Resolution (Resolves getgenv, _G, and getfenv safely)
+    - Auto Mouse Unlocker (__newindex metamethod hook + RenderStepped enforcement; zero ESC required)
+    - Universal Havoc Entity Scanner (Detects both Players and AI Scavengers across any server folder)
+    - Dual-Engine ESP: High-performance 2D Drawing Vector API + Infallible Native BillboardGui Engine
     - Hardware Chams: AlwaysOnTop highlight shaders on all resolved Havoc enemy models
     - Silent Aim: Metamethod & hookfunction redirection on Workspace:Raycast & hitPos replication
     - Camera Aimbot: Smooth camera tracking with 3D velocity lead prediction (Prediction X / Y)
@@ -19,7 +21,58 @@ local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
--- Global Runtime State Cache
+-- =========================================================================
+-- SECTION 1: EXECUTOR ENVIRONMENT RESOLUTION
+-- =========================================================================
+local function getGlobal(name)
+    local direct = nil
+    pcall(function()
+        direct = getfenv()[name]
+    end)
+    if direct ~= nil then return direct end
+
+    if typeof(getgenv) == "function" then
+        local ok, genv = pcall(getgenv)
+        if ok and typeof(genv) == "table" and genv[name] ~= nil then
+            return genv[name]
+        end
+    end
+
+    if typeof(_G) == "table" and _G[name] ~= nil then
+        return _G[name]
+    end
+
+    return nil
+end
+
+local DrawingLib = getGlobal("Drawing")
+local hasDrawing = typeof(DrawingLib) == "table" and typeof(DrawingLib.new) == "function"
+local hookmeta = getGlobal("hookmetamethod")
+local hookfn = getGlobal("hookfunction")
+local newccl = getGlobal("newcclosure") or function(f) return f end
+local gethui = getGlobal("gethui")
+local mousemoverel = getGlobal("mousemoverel")
+
+local isMenuVisible = true
+
+-- =========================================================================
+-- SECTION 2: AUTO MOUSE UNLOCK (NO ESC REQUIRED)
+-- =========================================================================
+if typeof(hookmeta) == "function" then
+    pcall(function()
+        local oldNewIndex
+        oldNewIndex = hookmeta(game, "__newindex", newccl(function(self, key, value)
+            if isMenuVisible and self == UserInputService and key == "MouseBehavior" then
+                return oldNewIndex(self, key, Enum.MouseBehavior.Default)
+            end
+            return oldNewIndex(self, key, value)
+        end))
+    end)
+end
+
+-- =========================================================================
+-- SECTION 3: GLOBAL CONFIGURATION
+-- =========================================================================
 local Config = {
     Aimbot = {
         Enabled = false,
@@ -63,10 +116,12 @@ local Config = {
         Distances = false,
         Tracers = false,
         TracerOrigin = "Bottom",
+        IncludeScavs = true,
         TeamCheck = false,
-        MaxDistance = 1500,
+        MaxDistance = 2000,
         BoxColor = Color3.fromRGB(255, 255, 255),
         TracerColor = Color3.fromRGB(0, 110, 255),
+        Engine = "Auto (Dual Layer)",
     },
     Visuals = {
         Chams = false,
@@ -86,58 +141,140 @@ local Config = {
 }
 
 -- =========================================================================
--- HAVOC ENTITY RESOLVER
+-- SECTION 4: UNIVERSAL HAVOC ENTITY SCANNER
 -- =========================================================================
-local function getCharacter(player)
-    if not player or player == LocalPlayer then return nil end
+local ActiveEntities = {}
 
-    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-        return player.Character
+local function isLivingCharacter(model)
+    if not model or not model:IsA("Model") then return false end
+    if LocalPlayer and LocalPlayer.Character and model == LocalPlayer.Character then return false end
+
+    -- Havoc dead ragdoll detection
+    if model:FindFirstChild("ClientRagdoll") or model:FindFirstChild("ClientRagdollV1") then
+        return false
     end
 
-    local container = Workspace:FindFirstChild("LJ1Msin@L5k81nwJUx")
-    if container then
-        local char = container:FindFirstChild(player.Name)
-        if char and char:IsA("Model") and char:FindFirstChild("HumanoidRootPart") then
-            return char
-        end
+    local hrp = model:FindFirstChild("HumanoidRootPart")
+    local head = model:FindFirstChild("Head")
+    if not hrp or not head then return false end
+
+    local hum = model:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Health <= 0 then return false end
+
+    return true, hrp, head, hum
+end
+
+local function resolveEntity(model)
+    local isLiving, hrp, head, hum = isLivingCharacter(model)
+    if not isLiving then return nil end
+
+    local player = Players:GetPlayerFromCharacter(model)
+    if not player then
+        player = Players:FindFirstChild(model.Name)
     end
 
-    for _, obj in ipairs(Workspace:GetChildren()) do
-        if obj:IsA("Folder") then
-            local char = obj:FindFirstChild(player.Name)
-            if char and char:IsA("Model") and char:FindFirstChild("HumanoidRootPart") then
-                return char
+    local displayName = model.Name
+    local isPlayer = false
+    if player then
+        isPlayer = true
+        displayName = player.DisplayName .. " (@" .. player.Name .. ")"
+    end
+
+    return {
+        Model = model,
+        HRP = hrp,
+        Head = head,
+        Humanoid = hum,
+        Player = player,
+        IsPlayer = isPlayer,
+        DisplayName = displayName,
+    }
+end
+
+local function scanEntities()
+    local found = {}
+
+    local function checkModel(m)
+        if m:IsA("Model") then
+            local data = resolveEntity(m)
+            if data then
+                found[m] = data
             end
-        elseif obj:IsA("Model") and obj.Name == player.Name and obj:FindFirstChild("HumanoidRootPart") then
-            return obj
         end
     end
 
-    return nil
+    -- 1. Direct Workspace Children & 1-level subfolders
+    for _, child in ipairs(Workspace:GetChildren()) do
+        if child:IsA("Model") then
+            checkModel(child)
+        elseif child:IsA("Folder") then
+            for _, sub in ipairs(child:GetChildren()) do
+                if sub:IsA("Model") then
+                    checkModel(sub)
+                end
+            end
+        end
+    end
+
+    -- 2. Check Players character models
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            checkModel(p.Character)
+        end
+    end
+
+    ActiveEntities = found
 end
 
-local function getTargetBone(char, requestedPart)
-    if not char then return nil end
+-- Initial scan & periodic entity updater
+scanEntities()
+task.spawn(function()
+    while true do
+        task.wait(1)
+        pcall(scanEntities)
+    end
+end)
+
+Workspace.ChildAdded:Connect(function(child)
+    if child:IsA("Model") then
+        local data = resolveEntity(child)
+        if data then ActiveEntities[child] = data end
+    elseif child:IsA("Folder") then
+        child.ChildAdded:Connect(function(sub)
+            if sub:IsA("Model") then
+                local data = resolveEntity(sub)
+                if data then ActiveEntities[sub] = data end
+            end
+        end)
+    end
+end)
+
+Workspace.ChildRemoved:Connect(function(child)
+    if ActiveEntities[child] then
+        ActiveEntities[child] = nil
+    end
+end)
+
+local function getTargetBone(model, requestedPart)
+    if not model then return nil end
     if requestedPart == "Head" then
-        return char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+        return model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart")
     elseif requestedPart == "Torso" or requestedPart == "UpperTorso" then
-        return char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("HumanoidRootPart")
+        return model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso") or model:FindFirstChild("HumanoidRootPart")
     else
-        return char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head")
+        return model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("Head")
     end
 end
 
 -- =========================================================================
--- HAVOC ANTICHEAT NEUTRALIZER & SILENT AIM RAYCAST HOOK
+-- SECTION 5: COMBAT HOOKS (SILENT AIM & ANTICHEAT)
 -- =========================================================================
 local currentSilentTargetBone = nil
 
-pcall(function()
-    local hookmeta = rawget(getfenv(), "hookmetamethod")
-    if typeof(hookmeta) == "function" then
+if typeof(hookmeta) == "function" then
+    pcall(function()
         local oldNamecall
-        oldNamecall = hookmeta(game, "__namecall", function(self, ...)
+        oldNamecall = hookmeta(game, "__namecall", newccl(function(self, ...)
             local method = getnamecallmethod()
             local args = { ... }
 
@@ -176,15 +313,12 @@ pcall(function()
             end
 
             return oldNamecall(self, ...)
-        end)
-    end
-end)
+        end))
+    end)
+end
 
-pcall(function()
-    local hookfn = rawget(getfenv(), "hookfunction")
-    local newccl = rawget(getfenv(), "newcclosure") or function(f) return f end
-
-    if typeof(hookfn) == "function" and typeof(Workspace.Raycast) == "function" then
+if typeof(hookfn) == "function" and typeof(Workspace.Raycast) == "function" then
+    pcall(function()
         local oldRaycast
         oldRaycast = hookfn(Workspace.Raycast, newccl(function(self, origin, direction, params)
             if Config.SilentAim.Enabled and currentSilentTargetBone and math.random(1, 100) <= Config.SilentAim.HitRate then
@@ -196,11 +330,11 @@ pcall(function()
             end
             return oldRaycast(self, origin, direction, params)
         end))
-    end
-end)
+    end)
+end
 
 -- =========================================================================
--- SECTION 2: TOP-NAVBAR UI FRAMEWORK (AUTO MOUSE UNLOCK)
+-- SECTION 6: UI FRAMEWORK (LAYOUT-ORDER IMMUNE)
 -- =========================================================================
 local Library = {}
 Library.Theme = {
@@ -236,7 +370,6 @@ Library.Theme = {
 }
 
 local function getSafeParent()
-    local gethui = rawget(getfenv(), "gethui")
     if typeof(gethui) == "function" then
         local success, hui = pcall(gethui)
         if success and hui then return hui end
@@ -282,8 +415,6 @@ local function makeDraggable(dragHandle, container)
         end
     end)
 end
-
-local isMenuVisible = true
 
 function Library.CreateWindow(config)
     local title = config.Title or "silent.cc"
@@ -335,7 +466,6 @@ function Library.CreateWindow(config)
 
     makeDraggable(titleBar, mainFrame)
 
-    -- Toggle handler with Mouse Unlock logic
     local function setVisibility(visible)
         isMenuVisible = visible
         mainFrame.Visible = visible
@@ -351,7 +481,6 @@ function Library.CreateWindow(config)
         end
     end)
 
-    -- Top Navigation Bar
     local navBar = Instance.new("Frame")
     navBar.Name = "NavBar"
     navBar.Size = UDim2.new(1, -20, 0, 30)
@@ -394,7 +523,7 @@ function Library.CreateWindow(config)
         local tabIndex = #Window.Tabs + 1
 
         local tabBtn = Instance.new("TextButton")
-        tabBtn.Name = "TabBtn_" .. tabName
+        tabBtn.Name = string.format("Tab_%02d_%s", tabIndex, tabName)
         tabBtn.Size = UDim2.new(0, 85, 0, 24)
         tabBtn.LayoutOrder = tabIndex
         tabBtn.BackgroundColor3 = Library.Theme.NavbarBg
@@ -495,7 +624,7 @@ function Library.CreateWindow(config)
             local parentCol = (columnSide == "Right") and rightCol or leftCol
 
             local groupbox = Instance.new("Frame")
-            groupbox.Name = "Group_" .. tostring(groupboxCount) .. "_" .. groupTitleText
+            groupbox.Name = string.format("Group_%02d_%s", groupboxCount, groupTitleText)
             groupbox.LayoutOrder = groupboxCount
             groupbox.Size = UDim2.new(1, 0, 0, 0)
             groupbox.AutomaticSize = Enum.AutomaticSize.Y
@@ -550,10 +679,11 @@ function Library.CreateWindow(config)
                 local state = default or false
                 local keybind = options and options.Keybind or nil
                 local callback = options and options.Callback
+                local order = nextOrder()
 
                 local row = Instance.new("Frame")
-                row.Name = "Toggle_" .. label
-                row.LayoutOrder = nextOrder()
+                row.Name = string.format("%03d_Toggle_%s", order, label)
+                row.LayoutOrder = order
                 row.Size = UDim2.new(1, 0, 0, 19)
                 row.BackgroundTransparency = 1
                 row.Parent = itemsContainer
@@ -644,10 +774,11 @@ function Library.CreateWindow(config)
             function Group:AddSlider(label, min, max, default, unit, callback)
                 local currentVal = math.clamp(default or min, min, max)
                 local u = unit or ""
+                local order = nextOrder()
 
                 local sliderContainer = Instance.new("Frame")
-                sliderContainer.Name = "Slider_" .. label
-                sliderContainer.LayoutOrder = nextOrder()
+                sliderContainer.Name = string.format("%03d_Slider_%s", order, label)
+                sliderContainer.LayoutOrder = order
                 sliderContainer.Size = UDim2.new(1, 0, 0, 34)
                 sliderContainer.BackgroundTransparency = 1
                 sliderContainer.Parent = itemsContainer
@@ -742,10 +873,11 @@ function Library.CreateWindow(config)
             function Group:AddDropdown(label, items, default, callback)
                 local selected = default or items[1] or "None"
                 local isOpen = false
+                local order = nextOrder()
 
                 local dropContainer = Instance.new("Frame")
-                dropContainer.Name = "Dropdown_" .. label
-                dropContainer.LayoutOrder = nextOrder()
+                dropContainer.Name = string.format("%03d_Dropdown_%s", order, label)
+                dropContainer.LayoutOrder = order
                 dropContainer.Size = UDim2.new(1, 0, 0, 40)
                 dropContainer.BackgroundTransparency = 1
                 dropContainer.ClipsDescendants = false
@@ -852,10 +984,11 @@ function Library.CreateWindow(config)
 
             function Group:AddColorPicker(label, default, callback)
                 local currentColor = default or Color3.fromRGB(0, 255, 170)
+                local order = nextOrder()
 
                 local colorRow = Instance.new("Frame")
-                colorRow.Name = "ColorRow_" .. label
-                colorRow.LayoutOrder = nextOrder()
+                colorRow.Name = string.format("%03d_Color_%s", order, label)
+                colorRow.LayoutOrder = order
                 colorRow.Size = UDim2.new(1, 0, 0, 22)
                 colorRow.BackgroundTransparency = 1
                 colorRow.Parent = itemsContainer
@@ -896,9 +1029,10 @@ function Library.CreateWindow(config)
             end
 
             function Group:AddButton(label, callback)
+                local order = nextOrder()
                 local btn = Instance.new("TextButton")
-                btn.Name = "Btn_" .. label
-                btn.LayoutOrder = nextOrder()
+                btn.Name = string.format("%03d_Btn_%s", order, label)
+                btn.LayoutOrder = order
                 btn.Size = UDim2.new(1, 0, 0, 24)
                 btn.BackgroundColor3 = Library.Theme.InputBg
                 btn.BorderSizePixel = 0
@@ -941,18 +1075,15 @@ function Library.CreateWindow(config)
 end
 
 -- =========================================================================
--- SECTION 3: DRAWING FOV CIRCLES
+-- SECTION 7: DRAWING FOV CIRCLES
 -- =========================================================================
 local FOVCircles = {
     Aimbot = nil,
     SilentAim = nil,
 }
 
-local hasDrawing = typeof(rawget(getfenv(), "Drawing")) == "table"
-
 if hasDrawing then
     pcall(function()
-        local DrawingLib = rawget(getfenv(), "Drawing")
         local aimCircle = DrawingLib.new("Circle")
         aimCircle.Visible = false
         aimCircle.Radius = Config.Aimbot.FOV
@@ -980,14 +1111,14 @@ if hasDrawing then
 end
 
 -- =========================================================================
--- SECTION 4: FULL DRAWING ESP POOL
+-- SECTION 8: DUAL-ENGINE ESP (DRAWING 2D + NATIVE BILLBOARDGUI)
 -- =========================================================================
-local EspPool = {}
+local DrawingEspPool = {}
+local BillboardEspPool = {}
 
-local function createPlayerEsp(player)
-    if not hasDrawing or player == LocalPlayer then return end
+local function createDrawingEsp(model)
+    if not hasDrawing then return nil end
 
-    local DrawingLib = rawget(getfenv(), "Drawing")
     local espData = {
         BoxOutline = DrawingLib.new("Square"),
         Box = DrawingLib.new("Square"),
@@ -1032,25 +1163,100 @@ local function createPlayerEsp(player)
     espData.Tracer.Color = Config.Esp.TracerColor
     espData.Tracer.Thickness = 1
 
-    EspPool[player] = espData
+    return espData
 end
 
-local function removePlayerEsp(player)
-    local espData = EspPool[player]
+local function createBillboardEsp(ent)
+    local existing = ent.HRP:FindFirstChild("silent_bb_esp")
+    if existing then return existing end
+
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "silent_bb_esp"
+    bb.AlwaysOnTop = true
+    bb.ClipsDescendants = false
+    bb.LightInfluence = 0
+    bb.Size = UDim2.new(4.2, 0, 5.8, 0)
+    bb.StudsOffset = Vector3.new(0, 0, 0)
+    bb.Adornee = ent.HRP
+    bb.Enabled = false
+    bb.Parent = ent.HRP
+
+    local boxFrame = Instance.new("Frame")
+    boxFrame.Name = "BoxFrame"
+    boxFrame.Size = UDim2.new(1, 0, 1, 0)
+    boxFrame.BackgroundTransparency = 1
+    boxFrame.BorderSizePixel = 0
+    boxFrame.Parent = bb
+
+    local boxStroke = Instance.new("UIStroke")
+    boxStroke.Name = "Stroke"
+    boxStroke.Thickness = 1.5
+    boxStroke.Color = Config.Esp.BoxColor
+    boxStroke.Parent = boxFrame
+
+    local hpBg = Instance.new("Frame")
+    hpBg.Name = "HpBg"
+    hpBg.Size = UDim2.new(0, 3, 1, 0)
+    hpBg.Position = UDim2.new(0, -6, 0, 0)
+    hpBg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    hpBg.BorderSizePixel = 0
+    hpBg.Parent = bb
+
+    local hpFill = Instance.new("Frame")
+    hpFill.Name = "HpFill"
+    hpFill.Size = UDim2.new(1, 0, 1, 0)
+    hpFill.Position = UDim2.new(0, 0, 0, 0)
+    hpFill.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+    hpFill.BorderSizePixel = 0
+    hpFill.Parent = hpBg
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
+    nameLabel.Size = UDim2.new(2, 0, 0, 14)
+    nameLabel.Position = UDim2.new(-0.5, 0, 0, -16)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Font = Enum.Font.RobotoMono
+    nameLabel.TextSize = 11
+    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    nameLabel.TextStrokeTransparency = 0.2
+    nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    nameLabel.Text = ent.DisplayName
+    nameLabel.Parent = bb
+
+    local distLabel = Instance.new("TextLabel")
+    distLabel.Name = "DistLabel"
+    distLabel.Size = UDim2.new(2, 0, 0, 14)
+    distLabel.Position = UDim2.new(-0.5, 0, 1, 2)
+    distLabel.BackgroundTransparency = 1
+    distLabel.Font = Enum.Font.RobotoMono
+    distLabel.TextSize = 10
+    distLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    distLabel.TextStrokeTransparency = 0.2
+    distLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    distLabel.Text = "[0m]"
+    distLabel.Parent = bb
+
+    return bb
+end
+
+local function cleanupModelEsp(model)
+    local espData = DrawingEspPool[model]
     if espData then
-        for _, drawing in pairs(espData) do
-            pcall(function() drawing:Remove() end)
+        for _, d in pairs(espData) do
+            pcall(function() d:Remove() end)
         end
-        EspPool[player] = nil
+        DrawingEspPool[model] = nil
+    end
+
+    local bb = BillboardEspPool[model]
+    if bb then
+        pcall(function() bb:Destroy() end)
+        BillboardEspPool[model] = nil
     end
 end
 
-for _, p in ipairs(Players:GetPlayers()) do createPlayerEsp(p) end
-Players.PlayerAdded:Connect(createPlayerEsp)
-Players.PlayerRemoving:Connect(removePlayerEsp)
-
 -- =========================================================================
--- SECTION 5: HAVOC MENU INITIALIZATION
+-- SECTION 9: MENU INITIALIZATION
 -- =========================================================================
 local Window = Library.CreateWindow({
     Title = "silent.cc",
@@ -1131,25 +1337,28 @@ ExtraSilentGroup:AddSlider("Max Distance", 50, 500, Config.SilentAim.MaxDistance
 -- TAB 2: ESP
 local EspTab = Window:CreateTab("Esp")
 
-local PlayerEspGroup = EspTab:CreateGroupbox("Player ESP", "Left")
+local PlayerEspGroup = EspTab:CreateGroupbox("Player & NPC ESP", "Left")
 PlayerEspGroup:AddToggle("Enabled", Config.Esp.Enabled, { Callback = function(v) Config.Esp.Enabled = v end })
 PlayerEspGroup:AddToggle("Box ESP", Config.Esp.Boxes, { Callback = function(v) Config.Esp.Boxes = v end })
 PlayerEspGroup:AddToggle("Health Bar", Config.Esp.Health, { Callback = function(v) Config.Esp.Health = v end })
 PlayerEspGroup:AddToggle("Name Tags", Config.Esp.Names, { Callback = function(v) Config.Esp.Names = v end })
 PlayerEspGroup:AddToggle("Distance Tags", Config.Esp.Distances, { Callback = function(v) Config.Esp.Distances = v end })
 PlayerEspGroup:AddToggle("Snapline Tracers", Config.Esp.Tracers, { Callback = function(v) Config.Esp.Tracers = v end })
+PlayerEspGroup:AddToggle("Chams Highlight", Config.Visuals.Chams, { Callback = function(v) Config.Visuals.Chams = v end })
 PlayerEspGroup:AddDropdown("Tracer Origin", { "Bottom", "Center", "Mouse" }, Config.Esp.TracerOrigin, function(v) Config.Esp.TracerOrigin = v end)
 
 local EspConfigGroup = EspTab:CreateGroupbox("ESP Settings", "Right")
+EspConfigGroup:AddDropdown("ESP Engine", { "Auto (Dual Layer)", "Drawing (2D)", "Billboard (Native)" }, Config.Esp.Engine, function(v) Config.Esp.Engine = v end)
+EspConfigGroup:AddToggle("Include AI Scavengers", Config.Esp.IncludeScavs, { Callback = function(v) Config.Esp.IncludeScavs = v end })
 EspConfigGroup:AddToggle("Team Check", Config.Esp.TeamCheck, { Callback = function(v) Config.Esp.TeamCheck = v end })
-EspConfigGroup:AddSlider("Max Distance", 100, 2500, Config.Esp.MaxDistance, " studs", function(v) Config.Esp.MaxDistance = v end)
+EspConfigGroup:AddSlider("Max Distance", 100, 3000, Config.Esp.MaxDistance, " studs", function(v) Config.Esp.MaxDistance = v end)
 EspConfigGroup:AddColorPicker("Box Color", Config.Esp.BoxColor, function(col) Config.Esp.BoxColor = col end)
 EspConfigGroup:AddColorPicker("Tracer Color", Config.Esp.TracerColor, function(col) Config.Esp.TracerColor = col end)
 
 -- TAB 3: VISUALS
 local VisualsTab = Window:CreateTab("Visuals")
 
-local ChamsGroup = VisualsTab:CreateGroupbox("Chams & Highlights", "Left")
+local ChamsGroup = VisualsTab:CreateGroupbox("Chams & Shaders", "Left")
 ChamsGroup:AddToggle("Enable Chams", Config.Visuals.Chams, { Callback = function(v) Config.Visuals.Chams = v end })
 ChamsGroup:AddColorPicker("Visible Color", Config.Visuals.VisibleColor, function(col) Config.Visuals.VisibleColor = col end)
 ChamsGroup:AddColorPicker("Hidden Color", Config.Visuals.HiddenColor, function(col) Config.Visuals.HiddenColor = col end)
@@ -1195,12 +1404,18 @@ local SystemGroup = SettingsTab:CreateGroupbox("System", "Right")
 SystemGroup:AddButton("Unload silent.cc", function()
     if FOVCircles.Aimbot then FOVCircles.Aimbot:Remove() end
     if FOVCircles.SilentAim then FOVCircles.SilentAim:Remove() end
-    for p, _ in pairs(EspPool) do removePlayerEsp(p) end
+    for m, _ in pairs(DrawingEspPool) do cleanupModelEsp(m) end
+    for _, ent in pairs(ActiveEntities) do
+        local hl = ent.Model:FindFirstChild("silent_chams")
+        if hl then hl:Destroy() end
+        local bb = ent.HRP:FindFirstChild("silent_bb_esp")
+        if bb then bb:Destroy() end
+    end
     Window.ScreenGui:Destroy()
 end)
 
 -- =========================================================================
--- SECTION 6: RUNTIME EXECUTION LOOPS
+-- SECTION 10: RUNTIME EXECUTION LOOPS
 -- =========================================================================
 
 local function findBestTarget(fovRadius, boneName, wallCheck, maxDist)
@@ -1208,50 +1423,44 @@ local function findBestTarget(fovRadius, boneName, wallCheck, maxDist)
     local bestTarget = nil
     local minMouseDist = fovRadius
 
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            local char = getCharacter(player)
-            if char then
-                local hum = char:FindFirstChildOfClass("Humanoid")
-                local hrp = char:FindFirstChild("HumanoidRootPart")
+    for model, ent in pairs(ActiveEntities) do
+        local hrp = ent.HRP
+        local bone = getTargetBone(model, boneName)
 
-                if hum and hum.Health > 0 and hrp then
-                    local worldDist = (hrp.Position - Camera.CFrame.Position).Magnitude
-                    if not maxDist or worldDist <= maxDist then
-                        local bone = getTargetBone(char, boneName)
-                        if bone then
-                            local screen3D, onScreen = Camera:WorldToViewportPoint(bone.Position)
-                            if onScreen then
-                                local screenPos = Vector2.new(screen3D.X, screen3D.Y)
-                                local mouseDist = (screenPos - mousePos).Magnitude
+        if hrp and bone and model.Parent then
+            local worldDist = (hrp.Position - Camera.CFrame.Position).Magnitude
+            if not maxDist or worldDist <= maxDist then
+                local screen3D, onScreen = Camera:WorldToViewportPoint(bone.Position)
+                if onScreen and screen3D.Z > 0 then
+                    local screenPos = Vector2.new(screen3D.X, screen3D.Y)
+                    local mouseDist = (screenPos - mousePos).Magnitude
 
-                                if mouseDist < minMouseDist then
-                                    local visible = true
-                                    if wallCheck then
-                                        local rayParams = RaycastParams.new()
-                                        rayParams.FilterType = Enum.RaycastFilterType.Exclude
-                                        local ignoreList = { Camera }
-                                        if LocalPlayer.Character then table.insert(ignoreList, LocalPlayer.Character) end
-                                        rayParams.FilterDescendantsInstances = ignoreList
-
-                                        local hit = Workspace:Raycast(Camera.CFrame.Position, (bone.Position - Camera.CFrame.Position).Unit * 1000, rayParams)
-                                        if hit and not hit.Instance:IsDescendantOf(char) then
-                                            visible = false
-                                        end
-                                    end
-
-                                    if visible then
-                                        minMouseDist = mouseDist
-                                        bestTarget = {
-                                            Player = player,
-                                            Character = char,
-                                            Bone = bone,
-                                            ScreenPos = screenPos,
-                                            Distance = worldDist,
-                                        }
-                                    end
-                                end
+                    if mouseDist < minMouseDist then
+                        local visible = true
+                        if wallCheck then
+                            local rayParams = RaycastParams.new()
+                            rayParams.FilterType = Enum.RaycastFilterType.Exclude
+                            local ignoreList = { Camera }
+                            if LocalPlayer and LocalPlayer.Character then
+                                table.insert(ignoreList, LocalPlayer.Character)
                             end
+                            rayParams.FilterDescendantsInstances = ignoreList
+
+                            local hit = Workspace:Raycast(Camera.CFrame.Position, (bone.Position - Camera.CFrame.Position).Unit * 1000, rayParams)
+                            if hit and not hit.Instance:IsDescendantOf(model) then
+                                visible = false
+                            end
+                        end
+
+                        if visible then
+                            minMouseDist = mouseDist
+                            bestTarget = {
+                                Entity = ent,
+                                Model = model,
+                                Bone = bone,
+                                ScreenPos = screenPos,
+                                Distance = worldDist,
+                            }
                         end
                     end
                 end
@@ -1286,7 +1495,7 @@ RunService.RenderStepped:Connect(function()
             local targetPos = aimTarget.Bone.Position
 
             if Config.Aimbot.Prediction then
-                local hrp = aimTarget.Character:FindFirstChild("HumanoidRootPart")
+                local hrp = aimTarget.Entity.HRP
                 if hrp then
                     local vel = hrp.AssemblyLinearVelocity
                     targetPos = targetPos + Vector3.new(
@@ -1304,144 +1513,185 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- 4. Drawing 2D ESP Render Loop
-    if hasDrawing then
-        local vpSize = Camera.ViewportSize
-        local mousePos = UserInputService:GetMouseLocation()
-        local tracerOrigin = Vector2.new(vpSize.X / 2, vpSize.Y)
-        if Config.Esp.TracerOrigin == "Center" then
-            tracerOrigin = Vector2.new(vpSize.X / 2, vpSize.Y / 2)
-        elseif Config.Esp.TracerOrigin == "Mouse" then
-            tracerOrigin = mousePos
-        end
+    -- 4. ESP Render Pipeline
+    local vpSize = Camera.ViewportSize
+    local mousePos = UserInputService:GetMouseLocation()
+    local tracerOrigin = Vector2.new(vpSize.X / 2, vpSize.Y)
+    if Config.Esp.TracerOrigin == "Center" then
+        tracerOrigin = Vector2.new(vpSize.X / 2, vpSize.Y / 2)
+    elseif Config.Esp.TracerOrigin == "Mouse" then
+        tracerOrigin = mousePos
+    end
 
-        for player, esp in pairs(EspPool) do
-            local rendered = false
-            if Config.Esp.Enabled and player ~= LocalPlayer then
-                local char = getCharacter(player)
-                if char then
-                    local hum = char:FindFirstChildOfClass("Humanoid")
-                    local hrp = char:FindFirstChild("HumanoidRootPart")
-                    local head = char:FindFirstChild("Head")
+    local useDrawing = (Config.Esp.Engine == "Auto (Dual Layer)" or Config.Esp.Engine == "Drawing (2D)") and hasDrawing
+    local useBillboard = (Config.Esp.Engine == "Auto (Dual Layer)" or Config.Esp.Engine == "Billboard (Native)" or not hasDrawing)
 
-                    if hum and hum.Health > 0 and hrp and head then
-                        local worldDist = (hrp.Position - Camera.CFrame.Position).Magnitude
-                        if worldDist <= Config.Esp.MaxDistance then
-                            local hrpPos, hrpOn = Camera:WorldToViewportPoint(hrp.Position)
-                            local headPos, headOn = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.6, 0))
-                            local rootPos, rootOn = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3, 0))
+    for model, ent in pairs(ActiveEntities) do
+        if not model.Parent or not ent.HRP.Parent or (ent.Humanoid and ent.Humanoid.Health <= 0) then
+            cleanupModelEsp(model)
+            ActiveEntities[model] = nil
+        else
+            local hrp = ent.HRP
+            local head = ent.Head
+            local hum = ent.Humanoid
+            local worldDist = (hrp.Position - Camera.CFrame.Position).Magnitude
+            local inRange = worldDist <= Config.Esp.MaxDistance
+            local allowEntity = ent.IsPlayer or Config.Esp.IncludeScavs
 
-                            if hrpOn and headOn and rootOn then
-                                local height = math.abs(headPos.Y - rootPos.Y)
-                                local width = height * 0.65
-                                local boxPos = Vector2.new(hrpPos.X - width / 2, headPos.Y)
+            -- --- Native BillboardGui ESP Engine ---
+            local bb = BillboardEspPool[model]
+            if not bb then
+                bb = createBillboardEsp(ent)
+                BillboardEspPool[model] = bb
+            end
 
-                                -- 2D Box
-                                if Config.Esp.Boxes then
-                                    esp.BoxOutline.Size = Vector2.new(width, height)
-                                    esp.BoxOutline.Position = boxPos
-                                    esp.BoxOutline.Visible = true
+            if Config.Esp.Enabled and inRange and allowEntity and useBillboard then
+                bb.Enabled = true
+                local boxFrame = bb:FindFirstChild("BoxFrame")
+                if boxFrame then
+                    boxFrame.Visible = Config.Esp.Boxes
+                    local stroke = boxFrame:FindFirstChild("Stroke")
+                    if stroke then stroke.Color = Config.Esp.BoxColor end
+                end
 
-                                    esp.Box.Size = Vector2.new(width, height)
-                                    esp.Box.Position = boxPos
-                                    esp.Box.Color = Config.Esp.BoxColor
-                                    esp.Box.Visible = true
-                                else
-                                    esp.BoxOutline.Visible = false
-                                    esp.Box.Visible = false
-                                end
+                local hpBg = bb:FindFirstChild("HpBg")
+                if hpBg then
+                    hpBg.Visible = Config.Esp.Health
+                    local hpFill = hpBg:FindFirstChild("HpFill")
+                    if hpFill and hum then
+                        local pct = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+                        hpFill.Size = UDim2.new(1, 0, pct, 0)
+                        hpFill.Position = UDim2.new(0, 0, 1 - pct, 0)
+                        hpFill.BackgroundColor3 = Color3.fromRGB(math.floor(255 * (1 - pct)), math.floor(255 * pct), 0)
+                    end
+                end
 
-                                -- Health Bar
-                                if Config.Esp.Health then
-                                    local healthPct = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
-                                    local barHeight = height * healthPct
-                                    local barX = boxPos.X - 5
+                local nameLabel = bb:FindFirstChild("NameLabel")
+                if nameLabel then
+                    nameLabel.Visible = Config.Esp.Names
+                    nameLabel.Text = ent.DisplayName
+                end
 
-                                    esp.HealthBarOutline.From = Vector2.new(barX, boxPos.Y)
-                                    esp.HealthBarOutline.To = Vector2.new(barX, boxPos.Y + height)
-                                    esp.HealthBarOutline.Visible = true
+                local distLabel = bb:FindFirstChild("DistLabel")
+                if distLabel then
+                    distLabel.Visible = Config.Esp.Distances
+                    distLabel.Text = string.format("[%dm]", math.floor(worldDist))
+                end
+            else
+                bb.Enabled = false
+            end
 
-                                    esp.HealthBar.From = Vector2.new(barX, boxPos.Y + height)
-                                    esp.HealthBar.To = Vector2.new(barX, (boxPos.Y + height) - barHeight)
-                                    esp.HealthBar.Color = Color3.fromRGB(math.floor(255 * (1 - healthPct)), math.floor(255 * healthPct), 0)
-                                    esp.HealthBar.Visible = true
-                                else
-                                    esp.HealthBarOutline.Visible = false
-                                    esp.HealthBar.Visible = false
-                                end
+            -- --- 2D Drawing Vector ESP Engine ---
+            if useDrawing then
+                local esp = DrawingEspPool[model]
+                if not esp then
+                    esp = createDrawingEsp(model)
+                    DrawingEspPool[model] = esp
+                end
 
-                                -- Name Tag
-                                if Config.Esp.Names then
-                                    esp.Name.Text = player.Name
-                                    esp.Name.Position = Vector2.new(hrpPos.X, boxPos.Y - 14)
-                                    esp.Name.Visible = true
-                                else
-                                    esp.Name.Visible = false
-                                end
+                local rendered = false
+                if Config.Esp.Enabled and inRange and allowEntity then
+                    local hrpPos, hrpOn = Camera:WorldToViewportPoint(hrp.Position)
+                    local headPos, headOn = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.6, 0))
+                    local rootPos, rootOn = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3, 0))
 
-                                -- Distance Tag
-                                if Config.Esp.Distances then
-                                    esp.Distance.Text = string.format("[%dm]", math.floor(worldDist))
-                                    esp.Distance.Position = Vector2.new(hrpPos.X, boxPos.Y + height + 2)
-                                    esp.Distance.Visible = true
-                                else
-                                    esp.Distance.Visible = false
-                                end
+                    if hrpOn and headOn and rootOn and hrpPos.Z > 0 then
+                        local height = math.abs(headPos.Y - rootPos.Y)
+                        local width = math.clamp(height * 0.65, 4, 300)
+                        local boxPos = Vector2.new(hrpPos.X - width / 2, headPos.Y)
 
-                                -- Snapline Tracer
-                                if Config.Esp.Tracers then
-                                    esp.Tracer.From = tracerOrigin
-                                    esp.Tracer.To = Vector2.new(hrpPos.X, rootPos.Y)
-                                    esp.Tracer.Color = Config.Esp.TracerColor
-                                    esp.Tracer.Visible = true
-                                else
-                                    esp.Tracer.Visible = false
-                                end
+                        if Config.Esp.Boxes then
+                            esp.BoxOutline.Size = Vector2.new(width, height)
+                            esp.BoxOutline.Position = boxPos
+                            esp.BoxOutline.Visible = true
 
-                                rendered = true
-                            end
+                            esp.Box.Size = Vector2.new(width, height)
+                            esp.Box.Position = boxPos
+                            esp.Box.Color = Config.Esp.BoxColor
+                            esp.Box.Visible = true
+                        else
+                            esp.BoxOutline.Visible = false
+                            esp.Box.Visible = false
                         end
+
+                        if Config.Esp.Health and hum then
+                            local healthPct = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+                            local barHeight = height * healthPct
+                            local barX = boxPos.X - 5
+
+                            esp.HealthBarOutline.From = Vector2.new(barX, boxPos.Y)
+                            esp.HealthBarOutline.To = Vector2.new(barX, boxPos.Y + height)
+                            esp.HealthBarOutline.Visible = true
+
+                            esp.HealthBar.From = Vector2.new(barX, boxPos.Y + height)
+                            esp.HealthBar.To = Vector2.new(barX, (boxPos.Y + height) - barHeight)
+                            esp.HealthBar.Color = Color3.fromRGB(math.floor(255 * (1 - healthPct)), math.floor(255 * healthPct), 0)
+                            esp.HealthBar.Visible = true
+                        else
+                            esp.HealthBarOutline.Visible = false
+                            esp.HealthBar.Visible = false
+                        end
+
+                        if Config.Esp.Names then
+                            esp.Name.Text = ent.DisplayName
+                            esp.Name.Position = Vector2.new(hrpPos.X, boxPos.Y - 14)
+                            esp.Name.Visible = true
+                        else
+                            esp.Name.Visible = false
+                        end
+
+                        if Config.Esp.Distances then
+                            esp.Distance.Text = string.format("[%dm]", math.floor(worldDist))
+                            esp.Distance.Position = Vector2.new(hrpPos.X, boxPos.Y + height + 2)
+                            esp.Distance.Visible = true
+                        else
+                            esp.Distance.Visible = false
+                        end
+
+                        if Config.Esp.Tracers then
+                            esp.Tracer.From = tracerOrigin
+                            esp.Tracer.To = Vector2.new(hrpPos.X, rootPos.Y)
+                            esp.Tracer.Color = Config.Esp.TracerColor
+                            esp.Tracer.Visible = true
+                        else
+                            esp.Tracer.Visible = false
+                        end
+
+                        rendered = true
                     end
+                end
+
+                if not rendered then
+                    esp.BoxOutline.Visible = false
+                    esp.Box.Visible = false
+                    esp.HealthBarOutline.Visible = false
+                    esp.HealthBar.Visible = false
+                    esp.Name.Visible = false
+                    esp.Distance.Visible = false
+                    esp.Tracer.Visible = false
                 end
             end
 
-            if not rendered then
-                esp.BoxOutline.Visible = false
-                esp.Box.Visible = false
-                esp.HealthBarOutline.Visible = false
-                esp.HealthBar.Visible = false
-                esp.Name.Visible = false
-                esp.Distance.Visible = false
-                esp.Tracer.Visible = false
+            -- --- Hardware Chams Highlighting ---
+            local hl = model:FindFirstChild("silent_chams")
+            if Config.Visuals.Chams and allowEntity then
+                if not hl then
+                    hl = Instance.new("Highlight")
+                    hl.Name = "silent_chams"
+                    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                    hl.Parent = model
+                end
+                hl.FillColor = Config.Visuals.VisibleColor
+                hl.OutlineColor = Config.Visuals.HiddenColor
+                hl.FillTransparency = 0.5
+                hl.OutlineTransparency = Config.Visuals.Transparency / 100
+            else
+                if hl then hl:Destroy() end
             end
         end
     end
 
-    -- 5. Hardware Chams Highlighting
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            local char = getCharacter(player)
-            if char then
-                local hl = char:FindFirstChild("silent_chams")
-                if Config.Visuals.Chams then
-                    if not hl then
-                        hl = Instance.new("Highlight")
-                        hl.Name = "silent_chams"
-                        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                        hl.Parent = char
-                    end
-                    hl.FillColor = Config.Visuals.VisibleColor
-                    hl.OutlineColor = Config.Visuals.HiddenColor
-                    hl.FillTransparency = 0.5
-                    hl.OutlineTransparency = Config.Visuals.Transparency / 100
-                else
-                    if hl then hl:Destroy() end
-                end
-            end
-        end
-    end
-
-    -- 6. WalkSpeed Physics Override (Anticheat Protected)
+    -- 5. WalkSpeed Physics Override
     if Config.Character.SpeedOverride and LocalPlayer and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
         if hum and hum.WalkSpeed ~= Config.Character.SpeedValue then
@@ -1449,7 +1699,7 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- 7. Bunny Hop Loop
+    -- 6. Bunny Hop Loop
     if Config.Character.BunnyHop and UserInputService:IsKeyDown(Enum.KeyCode.Space) and LocalPlayer and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
         if hum and hum.FloorMaterial ~= Enum.Material.Air then
@@ -1457,7 +1707,7 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- 8. Fast Reload Speedup
+    -- 7. Fast Reload Speedup
     if Config.Character.FastReload and LocalPlayer and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
         if hum then
@@ -1473,4 +1723,4 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-print("[silent.cc] Havoc client running with auto mouse unlock, full 2D ESP & combat redirection.")
+print("[silent.cc] Havoc client operational: Dual ESP, Auto Mouse Unlock, Universal Scanner active.")
