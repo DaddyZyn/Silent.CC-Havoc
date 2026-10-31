@@ -131,7 +131,9 @@ local Config = {
     },
     Character = {
         SpeedOverride = false,
-        SpeedValue = 24,
+        SpeedValue = 20,
+        Fly = false,
+        FlySpeed = 20,
         InfiniteStamina = false,
         BunnyHop = false,
         FastReload = false,
@@ -1542,8 +1544,16 @@ MovementGroup:AddToggle("WalkSpeed Override", Config.Character.SpeedOverride, {
         end
     end
 })
-MovementGroup:AddSlider("Speed Value", 16, 100, Config.Character.SpeedValue, " studs", function(val)
+MovementGroup:AddSlider("Speed Value", 16, 50, Config.Character.SpeedValue, " studs", function(val)
     Config.Character.SpeedValue = val
+end)
+MovementGroup:AddToggle("Directional Fly", Config.Character.Fly, {
+    Callback = function(v)
+        Config.Character.Fly = v
+    end
+})
+MovementGroup:AddSlider("Fly Speed", 5, 60, Config.Character.FlySpeed, " studs", function(v)
+    Config.Character.FlySpeed = v
 end)
 MovementGroup:AddToggle("Infinite Stamina", Config.Character.InfiniteStamina, { Callback = function(v) Config.Character.InfiniteStamina = v end })
 MovementGroup:AddToggle("Bunny Hop", Config.Character.BunnyHop, { Callback = function(v) Config.Character.BunnyHop = v end })
@@ -1883,7 +1893,72 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- 6. Bunny Hop Loop
+    -- 6. Directional Fly Loop
+    if LocalPlayer and LocalPlayer.Character then
+        local char = LocalPlayer.Character
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChildOfClass("Humanoid")
+
+        if hrp and hum then
+            local flyVel = hrp:FindFirstChild("silent_fly_vel")
+            local flyGyro = hrp:FindFirstChild("silent_fly_gyro")
+
+            if Config.Character.Fly and hum.Health > 0 then
+                if not flyVel then
+                    flyVel = Instance.new("BodyVelocity")
+                    flyVel.Name = "silent_fly_vel"
+                    flyVel.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+                    flyVel.Parent = hrp
+                end
+                if not flyGyro then
+                    flyGyro = Instance.new("BodyGyro")
+                    flyGyro.Name = "silent_fly_gyro"
+                    flyGyro.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+                    flyGyro.P = 9e4
+                    flyGyro.Parent = hrp
+                end
+
+                hum.PlatformStand = true
+
+                local moveDir = Vector3.zero
+                local camCF = Camera.CFrame
+
+                if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+                    moveDir = moveDir + camCF.LookVector
+                end
+                if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+                    moveDir = moveDir - camCF.LookVector
+                end
+                if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+                    moveDir = moveDir - camCF.RightVector
+                end
+                if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+                    moveDir = moveDir + camCF.RightVector
+                end
+                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                    moveDir = moveDir + Vector3.new(0, 1, 0)
+                end
+                if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+                    moveDir = moveDir - Vector3.new(0, 1, 0)
+                end
+
+                if moveDir.Magnitude > 0 then
+                    flyVel.Velocity = moveDir.Unit * Config.Character.FlySpeed
+                else
+                    flyVel.Velocity = Vector3.zero
+                end
+                flyGyro.CFrame = camCF
+            else
+                if flyVel then flyVel:Destroy() end
+                if flyGyro then flyGyro:Destroy() end
+                if hum.PlatformStand and not Config.Character.Fly then
+                    hum.PlatformStand = false
+                end
+            end
+        end
+    end
+
+    -- 7. Bunny Hop Loop
     if Config.Character.BunnyHop and UserInputService:IsKeyDown(Enum.KeyCode.Space) and LocalPlayer and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
         if hum and hum.FloorMaterial ~= Enum.Material.Air then
