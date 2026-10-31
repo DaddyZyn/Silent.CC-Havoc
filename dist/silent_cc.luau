@@ -491,7 +491,7 @@ local function attemptSpawnItem(itemName, method)
         end)
     end
 
-    -- Pipeline 2: TraderStashRequest replication
+    -- Pipeline 2: TraderStashRequest replication (Vault & Trader stash)
     if method == "TraderStashRequest" or method == "All Pipelines" then
         pcall(function()
             local stashReq = ReplicatedStorage:FindFirstChild("TraderStashRequest")
@@ -499,9 +499,33 @@ local function attemptSpawnItem(itemName, method)
                 task.spawn(function()
                     pcall(function() stashReq:InvokeServer("Withdraw", itemName, 1) end)
                     pcall(function() stashReq:InvokeServer("Buy", itemName, 1) end)
+                    pcall(function() stashReq:InvokeServer("Take", itemName, 1) end)
+                    pcall(function() stashReq:InvokeServer("Transfer", itemName, 1) end)
                 end)
                 success = true
-                detail = detail .. " | Invoked TraderStashRequest"
+                detail = detail .. " | Invoked TraderStashRequest (Withdraw/Buy/Take)"
+            end
+        end)
+    end
+
+    -- Pipeline 2B: InventoryFunction replication (Hideout Vault commit)
+    if method == "TraderStashRequest" or method == "InventoryEvent" or method == "All Pipelines" then
+        pcall(function()
+            local invFn = ReplicatedStorage:FindFirstChild("Storage")
+            if invFn then
+                local events = invFn:FindFirstChild("Events")
+                if events then
+                    local fn = events:FindFirstChild("InventoryFunction")
+                    if fn and fn:IsA("RemoteFunction") then
+                        task.spawn(function()
+                            pcall(function() fn:InvokeServer("Add", itemName, 1) end)
+                            pcall(function() fn:InvokeServer("Equip", itemName, 1) end)
+                            pcall(function() fn:InvokeServer("MoveToStash", itemName, 1) end)
+                        end)
+                        success = true
+                        detail = detail .. " | Invoked InventoryFunction"
+                    end
+                end
             end
         end)
     end
