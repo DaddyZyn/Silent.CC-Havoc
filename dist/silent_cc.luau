@@ -134,7 +134,9 @@ local Config = {
         SpeedValue = 20,
         Fly = false,
         FlySpeed = 20,
-        InfiniteStamina = false,
+        FlightMode = "Hover Glide (Anti-Snapback)",
+        InfiniteStamina = true,
+        NoSlowdown = true,
         BunnyHop = false,
         FastReload = false,
         NoRecoil = false,
@@ -1544,18 +1546,22 @@ MovementGroup:AddToggle("WalkSpeed Override", Config.Character.SpeedOverride, {
         end
     end
 })
-MovementGroup:AddSlider("Speed Value", 16, 50, Config.Character.SpeedValue, " studs", function(val)
+MovementGroup:AddSlider("Speed Value", 16, 25, Config.Character.SpeedValue, " studs", function(val)
     Config.Character.SpeedValue = val
 end)
+MovementGroup:AddToggle("No Action Slowdown (ADS/Heal)", Config.Character.NoSlowdown, { Callback = function(v) Config.Character.NoSlowdown = v end })
+MovementGroup:AddToggle("Infinite Stamina", Config.Character.InfiniteStamina, { Callback = function(v) Config.Character.InfiniteStamina = v end })
 MovementGroup:AddToggle("Directional Fly", Config.Character.Fly, {
     Callback = function(v)
         Config.Character.Fly = v
     end
 })
-MovementGroup:AddSlider("Fly Speed", 5, 60, Config.Character.FlySpeed, " studs", function(v)
+MovementGroup:AddDropdown("Flight Mode", { "Hover Glide (Anti-Snapback)", "Wave Hop (Wall Climber)", "Uncapped Free Flight" }, Config.Character.FlightMode, function(v)
+    Config.Character.FlightMode = v
+end)
+MovementGroup:AddSlider("Fly Speed", 5, 35, Config.Character.FlySpeed, " studs", function(v)
     Config.Character.FlySpeed = v
 end)
-MovementGroup:AddToggle("Infinite Stamina", Config.Character.InfiniteStamina, { Callback = function(v) Config.Character.InfiniteStamina = v end })
 MovementGroup:AddToggle("Bunny Hop", Config.Character.BunnyHop, { Callback = function(v) Config.Character.BunnyHop = v end })
 
 local WeaponGroup = CharTab:CreateGroupbox("Weapon Handling", "Right")
@@ -1885,15 +1891,24 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- 5. WalkSpeed Physics Override
-    if Config.Character.SpeedOverride and LocalPlayer and LocalPlayer.Character then
+    -- 5. WalkSpeed & Tactical No-Slowdown Override
+    if LocalPlayer and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if hum and hum.WalkSpeed ~= Config.Character.SpeedValue then
-            hum.WalkSpeed = Config.Character.SpeedValue
+        if hum then
+            if Config.Character.SpeedOverride then
+                if hum.WalkSpeed ~= Config.Character.SpeedValue then
+                    hum.WalkSpeed = Config.Character.SpeedValue
+                end
+            elseif Config.Character.InfiniteStamina or Config.Character.NoSlowdown then
+                -- Lock minimum speed at 18 so ADS, healing, reloading, or 0 stamina never slow you down
+                if hum.WalkSpeed < 18 then
+                    hum.WalkSpeed = 18
+                end
+            end
         end
     end
 
-    -- 6. Directional Fly Loop
+    -- 6. Directional Fly Loop (Terrain-Contour Bypass Engine)
     if LocalPlayer and LocalPlayer.Character then
         local char = LocalPlayer.Character
         local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -1920,33 +1935,69 @@ RunService.RenderStepped:Connect(function()
 
                 hum.PlatformStand = true
 
-                local moveDir = Vector3.zero
                 local camCF = Camera.CFrame
+                local flatLook = Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z).Unit
+                local flatRight = Vector3.new(camCF.RightVector.X, 0, camCF.RightVector.Z).Unit
+                local horizDir = Vector3.zero
 
-                if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-                    moveDir = moveDir + camCF.LookVector
-                end
-                if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-                    moveDir = moveDir - camCF.LookVector
-                end
-                if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-                    moveDir = moveDir - camCF.RightVector
-                end
-                if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-                    moveDir = moveDir + camCF.RightVector
-                end
-                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-                    moveDir = moveDir + Vector3.new(0, 1, 0)
-                end
-                if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
-                    moveDir = moveDir - Vector3.new(0, 1, 0)
+                if UserInputService:IsKeyDown(Enum.KeyCode.W) then horizDir = horizDir + flatLook end
+                if UserInputService:IsKeyDown(Enum.KeyCode.S) then horizDir = horizDir - flatLook end
+                if UserInputService:IsKeyDown(Enum.KeyCode.A) then horizDir = horizDir - flatRight end
+                if UserInputService:IsKeyDown(Enum.KeyCode.D) then horizDir = horizDir + flatRight end
+
+                local horizVelocity = Vector3.zero
+                if horizDir.Magnitude > 0 then
+                    horizVelocity = horizDir.Unit * Config.Character.FlySpeed
                 end
 
-                if moveDir.Magnitude > 0 then
-                    flyVel.Velocity = moveDir.Unit * Config.Character.FlySpeed
-                else
-                    flyVel.Velocity = Vector3.zero
+                local targetYVel = 0
+
+                if Config.Character.FlightMode == "Hover Glide (Anti-Snapback)" then
+                    -- Ground Raycast to contour terrain & obstacles while maintaining grounded distance (<5 studs)
+                    local rayParams = RaycastParams.new()
+                    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+                    local ignoreList = { Camera, char }
+                    rayParams.FilterDescendantsInstances = ignoreList
+
+                    local downHit = Workspace:Raycast(hrp.Position + Vector3.new(0, 3, 0), Vector3.new(0, -40, 0), rayParams)
+                    local groundY = downHit and downHit.Position.Y or (hrp.Position.Y - 3)
+                    local hoverOffset = 3.3
+                    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                        hoverOffset = 4.2
+                    end
+                    local targetY = groundY + hoverOffset
+                    targetYVel = math.clamp((targetY - hrp.Position.Y) * 12, -20, 20)
+
+                elseif Config.Character.FlightMode == "Wave Hop (Wall Climber)" then
+                    local now = tick()
+                    if not flyAirtimeStart then flyAirtimeStart = now end
+                    local airtime = now - flyAirtimeStart
+
+                    if airtime < 0.65 then
+                        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                            targetYVel = 18
+                        elseif UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+                            targetYVel = -18
+                        else
+                            targetYVel = 0
+                        end
+                    elseif airtime < 0.8 then
+                        targetYVel = -35
+                    else
+                        flyAirtimeStart = now
+                    end
+
+                else -- "Uncapped Free Flight"
+                    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                        targetYVel = Config.Character.FlySpeed
+                    elseif UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+                        targetYVel = -Config.Character.FlySpeed
+                    else
+                        targetYVel = 0
+                    end
                 end
+
+                flyVel.Velocity = Vector3.new(horizVelocity.X, targetYVel, horizVelocity.Z)
                 flyGyro.CFrame = camCF
             else
                 if flyVel then flyVel:Destroy() end
@@ -1954,6 +2005,7 @@ RunService.RenderStepped:Connect(function()
                 if hum.PlatformStand and not Config.Character.Fly then
                     hum.PlatformStand = false
                 end
+                flyAirtimeStart = nil
             end
         end
     end
