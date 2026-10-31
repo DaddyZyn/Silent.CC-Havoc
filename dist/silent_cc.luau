@@ -1,15 +1,7 @@
---!strict
 --[[
     silent.cc | Havoc [Season 2] | discord.gg/silentcc
     Universal Client with Top-Navbar Architecture & Full Havoc Engine Hooks
-    
-    Subsystems Hooked:
-    1. Entity Resolver: Dynamically extracts player models from Workspace["LJ1Msin@L5k81nwJUx"]
-    2. Anticheat Bypass: Drops "OnPunishment" remote packets via __namecall metamethod
-    3. Silent Aim: Metamethod & hookfunction redirection on Workspace:Raycast / SwiftCast
-    4. Camera Aimbot: Target bone lead prediction, FOV circle checks, and smooth interpolation
-    5. Visuals & Chams: Native hardware Highlight chams + 2D Drawing ESP (Boxes, Tracers, Health, Names)
-    6. Movement & Handling: WalkSpeed physics override with anticheat immunity
+    Pure Standard Lua Execution (Zero Casts / Zero Strict Annotations)
 ]]
 
 local UserInputService = game:GetService("UserInputService")
@@ -90,15 +82,13 @@ local Config = {
 -- =========================================================================
 -- HAVOC ENTITY RESOLVER
 -- =========================================================================
-local function getCharacter(player: Player): Model?
+local function getCharacter(player)
     if not player or player == LocalPlayer then return nil end
 
-    -- Check direct player.Character
     if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
         return player.Character
     end
 
-    -- Check Havoc obfuscated container folder
     local container = Workspace:FindFirstChild("LJ1Msin@L5k81nwJUx")
     if container then
         local char = container:FindFirstChild(player.Name)
@@ -107,7 +97,6 @@ local function getCharacter(player: Player): Model?
         end
     end
 
-    -- Fallback: Scan all containers
     for _, obj in ipairs(Workspace:GetChildren()) do
         if obj:IsA("Folder") then
             local char = obj:FindFirstChild(player.Name)
@@ -122,36 +111,34 @@ local function getCharacter(player: Player): Model?
     return nil
 end
 
-local function getTargetBone(char: Model, requestedPart: string): BasePart?
+local function getTargetBone(char, requestedPart)
+    if not char then return nil end
     if requestedPart == "Head" then
-        return (char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")) :: BasePart?
+        return char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
     elseif requestedPart == "Torso" or requestedPart == "UpperTorso" then
-        return (char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("HumanoidRootPart")) :: BasePart?
+        return char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("HumanoidRootPart")
     else
-        return (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head")) :: BasePart?
+        return char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head")
     end
 end
 
 -- =========================================================================
 -- HAVOC ANTICHEAT NEUTRALIZER & SILENT AIM RAYCAST HOOK
 -- =========================================================================
-local currentSilentTargetBone: BasePart? = nil
+local currentSilentTargetBone = nil
 
--- Safe hookmetamethod
 pcall(function()
-    local hookmeta = (rawget(getfenv(), "hookmetamethod") :: any)
+    local hookmeta = rawget(getfenv(), "hookmetamethod")
     if typeof(hookmeta) == "function" then
         local oldNamecall
         oldNamecall = hookmeta(game, "__namecall", function(self, ...)
             local method = getnamecallmethod()
             local args = { ... }
 
-            -- 1. Drop MovementAnticheat Punishment Telemetry
             if (method == "FireServer" or method == "fireServer") and tostring(self.Name) == "OnPunishment" then
                 return
             end
 
-            -- 2. Redirect Bullet / SwiftCast Raycasts
             if (method == "Raycast" or method == "raycast") and self == Workspace then
                 if Config.SilentAim.Enabled and currentSilentTargetBone and math.random(1, 100) <= Config.SilentAim.HitRate then
                     local origin = args[1]
@@ -159,7 +146,7 @@ pcall(function()
                     if typeof(origin) == "Vector3" and typeof(direction) == "Vector3" then
                         local targetPos = currentSilentTargetBone.Position
                         args[2] = (targetPos - origin).Unit * direction.Magnitude
-                        return oldNamecall(self, table.unpack(args))
+                        return oldNamecall(self, unpack(args))
                     end
                 end
             end
@@ -169,10 +156,9 @@ pcall(function()
     end
 end)
 
--- Safe hookfunction for direct workspace:Raycast
 pcall(function()
-    local hookfn = (rawget(getfenv(), "hookfunction") :: any)
-    local newccl = (rawget(getfenv(), "newcclosure") :: any) or function(f) return f end
+    local hookfn = rawget(getfenv(), "hookfunction")
+    local newccl = rawget(getfenv(), "newcclosure") or function(f) return f end
 
     if typeof(hookfn) == "function" and typeof(Workspace.Raycast) == "function" then
         local oldRaycast
@@ -225,8 +211,8 @@ Library.Theme = {
     SliderText = Color3.fromRGB(255, 255, 255),
 }
 
-local function getSafeParent(): Instance
-    local gethui = (rawget(getfenv(), "gethui") :: any)
+local function getSafeParent()
+    local gethui = rawget(getfenv(), "gethui")
     if typeof(gethui) == "function" then
         local success, hui = pcall(gethui)
         if success and hui then return hui end
@@ -239,9 +225,9 @@ local function getSafeParent(): Instance
     error("[silent.cc] Failed to find UI container.")
 end
 
-local function makeDraggable(dragHandle: Frame, container: Frame)
+local function makeDraggable(dragHandle, container)
     local dragging = false
-    local dragInput: InputObject? = nil
+    local dragInput = nil
     local dragStart = Vector2.zero
     local startPos = UDim2.new()
 
@@ -273,7 +259,7 @@ local function makeDraggable(dragHandle: Frame, container: Frame)
     end)
 end
 
-function Library.CreateWindow(config: { Title: string, Game: string?, Link: string?, Size: Vector2?, ToggleKey: Enum.KeyCode? })
+function Library.CreateWindow(config)
     local title = config.Title or "silent.cc"
     local gameName = config.Game or "Havoc"
     local link = config.Link or "discord.gg/silentcc"
@@ -302,7 +288,7 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
     windowStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     windowStroke.Parent = mainFrame
 
-    -- Header / Titlebar (Clean, without _ / X)
+    -- Header / Titlebar
     local titleBar = Instance.new("Frame")
     titleBar.Name = "TitleBar"
     titleBar.Size = UDim2.new(1, 0, 0, 28)
@@ -371,7 +357,7 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
         CurrentTab = nil,
     }
 
-    function Window:CreateTab(tabName: string)
+    function Window:CreateTab(tabName)
         local tabIndex = #Window.Tabs + 1
 
         local tabBtn = Instance.new("TextButton")
@@ -471,12 +457,12 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
         local Tab = {}
         local groupboxCount = 0
 
-        function Tab:CreateGroupbox(title: string, columnSide: "Left" | "Right"?)
-            groupboxCount += 1
+        function Tab:CreateGroupbox(groupTitleText, columnSide)
+            groupboxCount = groupboxCount + 1
             local parentCol = (columnSide == "Right") and rightCol or leftCol
 
             local groupbox = Instance.new("Frame")
-            groupbox.Name = "Group_" .. tostring(groupboxCount) .. "_" .. title
+            groupbox.Name = "Group_" .. tostring(groupboxCount) .. "_" .. groupTitleText
             groupbox.LayoutOrder = groupboxCount
             groupbox.Size = UDim2.new(1, 0, 0, 0)
             groupbox.AutomaticSize = Enum.AutomaticSize.Y
@@ -499,7 +485,7 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
             groupTitle.TextSize = 12
             groupTitle.TextColor3 = Library.Theme.GroupboxTitle
             groupTitle.TextXAlignment = Enum.TextXAlignment.Left
-            groupTitle.Text = title
+            groupTitle.Text = groupTitleText
             groupTitle.Parent = groupbox
 
             local itemsContainer = Instance.new("Frame")
@@ -522,12 +508,12 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
 
             local Group = {}
             local itemOrder = 0
-            local function nextOrder(): number
-                itemOrder += 1
+            local function nextOrder()
+                itemOrder = itemOrder + 1
                 return itemOrder
             end
 
-            function Group:AddToggle(label: string, default: boolean, options: { Keybind: Enum.KeyCode?, Callback: ((boolean) -> ())? }?)
+            function Group:AddToggle(label, default, options)
                 local state = default or false
                 local keybind = options and options.Keybind or nil
                 local callback = options and options.Callback
@@ -612,7 +598,7 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
                 textBtn.MouseButton1Click:Connect(toggleState)
 
                 return {
-                    SetValue = function(newVal: boolean)
+                    SetValue = function(newVal)
                         state = newVal
                         box.BackgroundColor3 = state and Library.Theme.Accent or Library.Theme.InputBg
                         textBtn.TextColor3 = state and Color3.fromRGB(255, 255, 255) or Library.Theme.LabelText
@@ -622,7 +608,7 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
                 }
             end
 
-            function Group:AddSlider(label: string, min: number, max: number, default: number, unit: string?, callback: ((number) -> ())?)
+            function Group:AddSlider(label, min, max, default, unit, callback)
                 local currentVal = math.clamp(default or min, min, max)
                 local u = unit or ""
 
@@ -677,7 +663,7 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
                 valueText.Parent = track
 
                 local sliding = false
-                local function updateSlide(input: InputObject)
+                local function updateSlide(input)
                     local trackX = track.AbsolutePosition.X
                     local trackW = track.AbsoluteSize.X
                     local mouseX = input.Position.X
@@ -709,7 +695,7 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
                 end)
 
                 return {
-                    SetValue = function(val: number)
+                    SetValue = function(val)
                         currentVal = math.clamp(val, min, max)
                         local pct = (currentVal - min) / (max - min)
                         fill.Size = UDim2.new(pct, 0, 1, 0)
@@ -720,7 +706,7 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
                 }
             end
 
-            function Group:AddDropdown(label: string, items: { string }, default: string?, callback: ((string) -> ())?)
+            function Group:AddDropdown(label, items, default, callback)
                 local selected = default or items[1] or "None"
                 local isOpen = false
 
@@ -831,7 +817,7 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
                 }
             end
 
-            function Group:AddColorPicker(label: string, default: Color3, callback: ((Color3) -> ())?)
+            function Group:AddColorPicker(label, default, callback)
                 local currentColor = default or Color3.fromRGB(0, 255, 170)
 
                 local colorRow = Instance.new("Frame")
@@ -867,7 +853,7 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
                 previewStroke.Parent = colorPreview
 
                 return {
-                    SetColor = function(newColor: Color3)
+                    SetColor = function(newColor)
                         currentColor = newColor
                         colorPreview.BackgroundColor3 = currentColor
                         if callback then pcall(callback, currentColor) end
@@ -876,7 +862,7 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
                 }
             end
 
-            function Group:AddButton(label: string, callback: (() -> ())?)
+            function Group:AddButton(label, callback)
                 local btn = Instance.new("TextButton")
                 btn.Name = "Btn_" .. label
                 btn.LayoutOrder = nextOrder()
@@ -925,15 +911,16 @@ end
 -- SECTION 3: DRAWING FOV CIRCLES
 -- =========================================================================
 local FOVCircles = {
-    Aimbot = nil :: any,
-    SilentAim = nil :: any,
+    Aimbot = nil,
+    SilentAim = nil,
 }
 
 local hasDrawing = typeof(rawget(getfenv(), "Drawing")) == "table"
 
 if hasDrawing then
     pcall(function()
-        local aimCircle = (Drawing :: any).new("Circle")
+        local DrawingLib = rawget(getfenv(), "Drawing")
+        local aimCircle = DrawingLib.new("Circle")
         aimCircle.Visible = false
         aimCircle.Radius = Config.Aimbot.FOV
         aimCircle.Color = Config.Aimbot.Color
@@ -942,7 +929,7 @@ if hasDrawing then
         aimCircle.Transparency = 1
         FOVCircles.Aimbot = aimCircle
 
-        local silentCircle = (Drawing :: any).new("Circle")
+        local silentCircle = DrawingLib.new("Circle")
         silentCircle.Visible = false
         silentCircle.Radius = Config.SilentAim.FOV
         silentCircle.Color = Config.SilentAim.Color
@@ -1128,10 +1115,9 @@ end)
 -- SECTION 5: RUNTIME EXECUTION LOOPS
 -- =========================================================================
 
--- Target Acquisition for Silent Aim & Aimbot
-local function findBestTarget(fovRadius: number, boneName: string, wallCheck: boolean, maxDist: number?)
+local function findBestTarget(fovRadius, boneName, wallCheck, maxDist)
     local mousePos = UserInputService:GetMouseLocation()
-    local bestTarget: { Player: Player, Character: Model, Bone: BasePart, ScreenPos: Vector2, Distance: number }? = nil
+    local bestTarget = nil
     local minMouseDist = fovRadius
 
     for _, player in ipairs(Players:GetPlayers()) do
@@ -1139,10 +1125,9 @@ local function findBestTarget(fovRadius: number, boneName: string, wallCheck: bo
             local char = getCharacter(player)
             if char then
                 local hum = char:FindFirstChildOfClass("Humanoid")
-                local hrp = char:FindFirstChild("HumanoidRootPart") :: BasePart?
+                local hrp = char:FindFirstChild("HumanoidRootPart")
 
                 if hum and hum.Health > 0 and hrp then
-                    -- Distance Check
                     local worldDist = (hrp.Position - Camera.CFrame.Position).Magnitude
                     if not maxDist or worldDist <= maxDist then
                         local bone = getTargetBone(char, boneName)
@@ -1206,9 +1191,8 @@ RunService.RenderStepped:Connect(function()
         if aimTarget and aimTarget.Bone then
             local targetPos = aimTarget.Bone.Position
 
-            -- Lead Prediction
             if Config.Aimbot.Prediction then
-                local hrp = aimTarget.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+                local hrp = aimTarget.Character:FindFirstChild("HumanoidRootPart")
                 if hrp then
                     local vel = hrp.AssemblyLinearVelocity
                     targetPos = targetPos + Vector3.new(
@@ -1219,7 +1203,6 @@ RunService.RenderStepped:Connect(function()
                 end
             end
 
-            -- Smooth Camera Interpolation
             local currentCF = Camera.CFrame
             local targetCF = CFrame.new(currentCF.Position, targetPos)
             local smoothFactor = math.clamp(1 / math.max(Config.Aimbot.Smoothing, 1), 0.05, 1)
@@ -1240,10 +1223,10 @@ RunService.RenderStepped:Connect(function()
                         hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
                         hl.Parent = char
                     end
-                    (hl :: Highlight).FillColor = Config.Visuals.VisibleColor
-                    (hl :: Highlight).OutlineColor = Config.Visuals.HiddenColor
-                    (hl :: Highlight).FillTransparency = 0.5
-                    (hl :: Highlight).OutlineTransparency = Config.Visuals.Transparency / 100
+                    hl.FillColor = Config.Visuals.VisibleColor
+                    hl.OutlineColor = Config.Visuals.HiddenColor
+                    hl.FillTransparency = 0.5
+                    hl.OutlineTransparency = Config.Visuals.Transparency / 100
                 else
                     if hl then hl:Destroy() end
                 end

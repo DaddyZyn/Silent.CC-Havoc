@@ -1,20 +1,24 @@
 --[[
     silent.cc - Havoc [Season 2] Universal Loader
-    Safe execution wrapper with error assertion
+    Bypasses Fastly CDN cache locks & surfaces compile diagnostics
 ]]
 
-local success, content = pcall(function()
-    return game:HttpGet("https://raw.githubusercontent.com/DaddyZyn/Silent.CC-Havoc/main/dist/silent_cc.luau", true)
+local timestamp = tostring(math.floor(os.time() / 15))
+local url = "https://raw.githubusercontent.com/DaddyZyn/Silent.CC-Havoc/main/dist/silent_cc.luau?t=" .. timestamp
+
+local success, source = pcall(function()
+    return game:HttpGet(url, true)
 end)
 
-if not success or not content or content == "" or string.find(content, "404") then
-    warn("[silent.cc] Failed to fetch source from GitHub. CDN may still be syncing.")
-    return
+if not success or not source or source == "" or string.find(source, "404") then
+    source = game:HttpGet("https://raw.githubusercontent.com/DaddyZyn/Silent.CC-Havoc/main/dist/silent_cc.luau", true)
 end
 
-local execute, compileErr = loadstring(content)
+local execute, compileErr = loadstring(source)
 if not execute then
-    error("[silent.cc] Compilation error: " .. tostring(compileErr))
+    warn("[silent.cc] Compilation error caught:")
+    warn(tostring(compileErr))
+    return
 end
 
 return execute()
