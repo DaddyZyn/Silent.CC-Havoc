@@ -76,7 +76,7 @@ end
 local Config = {
     Aimbot = {
         Enabled = false,
-        Key = Enum.KeyCode.E,
+        Key = Enum.UserInputType.MouseButton2,
         Mode = "Camera",
         Part = "Head",
         FOV = 150,
@@ -675,9 +675,32 @@ function Library.CreateWindow(config)
                 return itemOrder
             end
 
+            local function formatKeyName(key)
+                if not key then return "None" end
+                if typeof(key) == "EnumItem" then
+                    if key == Enum.UserInputType.MouseButton1 then
+                        return "MB1"
+                    elseif key == Enum.UserInputType.MouseButton2 then
+                        return "MB2"
+                    elseif key == Enum.UserInputType.MouseButton3 then
+                        return "MB3"
+                    elseif key.EnumType == Enum.KeyCode then
+                        if key == Enum.KeyCode.RightShift then return "RShift" end
+                        if key == Enum.KeyCode.LeftShift then return "LShift" end
+                        if key == Enum.KeyCode.RightControl then return "RCtrl" end
+                        if key == Enum.KeyCode.LeftControl then return "LCtrl" end
+                        if key == Enum.KeyCode.RightAlt then return "RAlt" end
+                        if key == Enum.KeyCode.LeftAlt then return "LAlt" end
+                        return key.Name
+                    end
+                end
+                return tostring(key)
+            end
+
             function Group:AddToggle(label, default, options)
                 local state = default or false
                 local keybind = options and options.Keybind or nil
+                local onKeyChanged = options and options.OnKeyChanged
                 local callback = options and options.Callback
                 local order = nextOrder()
 
@@ -715,17 +738,21 @@ function Library.CreateWindow(config)
                 textBtn.Text = label
                 textBtn.Parent = row
 
-                if keybind then
+                if keybind ~= nil or onKeyChanged ~= nil then
+                    local currentKey = keybind
+                    local listening = false
+                    local listenStartTime = 0
+
                     local keybindBtn = Instance.new("TextButton")
                     keybindBtn.Name = "Keybind"
-                    keybindBtn.Size = UDim2.new(0, 28, 0, 16)
-                    keybindBtn.Position = UDim2.new(1, -28, 0.5, -8)
+                    keybindBtn.Size = UDim2.new(0, 42, 0, 16)
+                    keybindBtn.Position = UDim2.new(1, -42, 0.5, -8)
                     keybindBtn.BackgroundColor3 = Library.Theme.InputBg
                     keybindBtn.BorderSizePixel = 0
                     keybindBtn.Font = Enum.Font.RobotoMono
                     keybindBtn.TextSize = 10
                     keybindBtn.TextColor3 = Library.Theme.MutedText
-                    keybindBtn.Text = keybind.Name
+                    keybindBtn.Text = formatKeyName(currentKey)
                     keybindBtn.Parent = row
 
                     local kbStroke = Instance.new("UIStroke")
@@ -733,19 +760,43 @@ function Library.CreateWindow(config)
                     kbStroke.Thickness = 1
                     kbStroke.Parent = keybindBtn
 
-                    local listening = false
                     keybindBtn.MouseButton1Click:Connect(function()
                         listening = true
+                        listenStartTime = tick()
                         keybindBtn.Text = "..."
                         keybindBtn.TextColor3 = Library.Theme.Accent
                     end)
 
                     UserInputService.InputBegan:Connect(function(input, gpe)
-                        if listening and not gpe and input.UserInputType == Enum.UserInputType.Keyboard then
-                            keybind = input.KeyCode
-                            keybindBtn.Text = keybind.Name
+                        if not listening then return end
+                        if tick() - listenStartTime < 0.12 then return end
+
+                        local chosen = nil
+                        if input.UserInputType == Enum.UserInputType.Keyboard then
+                            if input.KeyCode == Enum.KeyCode.Escape then
+                                keybindBtn.Text = formatKeyName(currentKey)
+                                keybindBtn.TextColor3 = Library.Theme.MutedText
+                                listening = false
+                                return
+                            elseif input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
+                                chosen = nil
+                            else
+                                chosen = input.KeyCode
+                            end
+                        elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+                            chosen = Enum.UserInputType.MouseButton1
+                        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+                            chosen = Enum.UserInputType.MouseButton2
+                        elseif input.UserInputType == Enum.UserInputType.MouseButton3 then
+                            chosen = Enum.UserInputType.MouseButton3
+                        end
+
+                        if chosen ~= nil or input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
+                            currentKey = chosen
+                            keybindBtn.Text = formatKeyName(currentKey)
                             keybindBtn.TextColor3 = Library.Theme.MutedText
                             listening = false
+                            if onKeyChanged then pcall(onKeyChanged, currentKey) end
                         end
                     end)
                 end
@@ -768,6 +819,97 @@ function Library.CreateWindow(config)
                         if callback then pcall(callback, state) end
                     end,
                     GetValue = function() return state end,
+                }
+            end
+
+            function Group:AddKeybind(label, default, callback)
+                local currentKey = default or nil
+                local listening = false
+                local listenStartTime = 0
+                local order = nextOrder()
+
+                local row = Instance.new("Frame")
+                row.Name = string.format("%03d_Keybind_%s", order, label)
+                row.LayoutOrder = order
+                row.Size = UDim2.new(1, 0, 0, 20)
+                row.BackgroundTransparency = 1
+                row.Parent = itemsContainer
+
+                local labelText = Instance.new("TextLabel")
+                labelText.Name = "Label"
+                labelText.Size = UDim2.new(1, -50, 1, 0)
+                labelText.BackgroundTransparency = 1
+                labelText.Font = Enum.Font.RobotoMono
+                labelText.TextSize = 11
+                labelText.TextColor3 = Library.Theme.LabelText
+                labelText.TextXAlignment = Enum.TextXAlignment.Left
+                labelText.Text = label
+                labelText.Parent = row
+
+                local keyBtn = Instance.new("TextButton")
+                keyBtn.Name = "KeyButton"
+                keyBtn.Size = UDim2.new(0, 42, 0, 18)
+                keyBtn.Position = UDim2.new(1, -42, 0.5, -9)
+                keyBtn.BackgroundColor3 = Library.Theme.InputBg
+                keyBtn.BorderSizePixel = 0
+                keyBtn.Font = Enum.Font.RobotoMono
+                keyBtn.TextSize = 10
+                keyBtn.TextColor3 = Library.Theme.MutedText
+                keyBtn.Text = formatKeyName(currentKey)
+                keyBtn.Parent = row
+
+                local kbStroke = Instance.new("UIStroke")
+                kbStroke.Color = Library.Theme.InputBorder
+                kbStroke.Thickness = 1
+                kbStroke.Parent = keyBtn
+
+                keyBtn.MouseButton1Click:Connect(function()
+                    listening = true
+                    listenStartTime = tick()
+                    keyBtn.Text = "..."
+                    keyBtn.TextColor3 = Library.Theme.Accent
+                end)
+
+                UserInputService.InputBegan:Connect(function(input, gpe)
+                    if not listening then return end
+                    if tick() - listenStartTime < 0.12 then return end
+
+                    local chosen = nil
+                    if input.UserInputType == Enum.UserInputType.Keyboard then
+                        if input.KeyCode == Enum.KeyCode.Escape then
+                            keyBtn.Text = formatKeyName(currentKey)
+                            keyBtn.TextColor3 = Library.Theme.MutedText
+                            listening = false
+                            return
+                        elseif input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
+                            chosen = nil
+                        else
+                            chosen = input.KeyCode
+                        end
+                    elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+                        chosen = Enum.UserInputType.MouseButton1
+                    elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+                        chosen = Enum.UserInputType.MouseButton2
+                    elseif input.UserInputType == Enum.UserInputType.MouseButton3 then
+                        chosen = Enum.UserInputType.MouseButton3
+                    end
+
+                    if chosen ~= nil or input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
+                        currentKey = chosen
+                        keyBtn.Text = formatKeyName(currentKey)
+                        keyBtn.TextColor3 = Library.Theme.MutedText
+                        listening = false
+                        if callback then pcall(callback, currentKey) end
+                    end
+                end)
+
+                return {
+                    SetKey = function(newKey)
+                        currentKey = newKey
+                        keyBtn.Text = formatKeyName(currentKey)
+                        if callback then pcall(callback, currentKey) end
+                    end,
+                    GetKey = function() return currentKey end,
                 }
             end
 
@@ -1270,10 +1412,19 @@ local Window = Library.CreateWindow({
 local MainTab = Window:CreateTab("Main")
 
 local AimbotGroup = MainTab:CreateGroupbox("Aimbot", "Left")
+local aimKeyHolder = nil
+
 AimbotGroup:AddToggle("Enabled", Config.Aimbot.Enabled, {
     Keybind = Config.Aimbot.Key,
+    OnKeyChanged = function(k)
+        Config.Aimbot.Key = k
+        if aimKeyHolder then aimKeyHolder.SetKey(k) end
+    end,
     Callback = function(v) Config.Aimbot.Enabled = v end
 })
+aimKeyHolder = AimbotGroup:AddKeybind("Aim key", Config.Aimbot.Key, function(k)
+    Config.Aimbot.Key = k
+end)
 AimbotGroup:AddDropdown("Aim mode", { "Camera", "Mouse" }, Config.Aimbot.Mode, function(v) Config.Aimbot.Mode = v end)
 AimbotGroup:AddDropdown("Aim part", { "Head", "Torso", "HumanoidRootPart" }, Config.Aimbot.Part, function(v) Config.Aimbot.Part = v end)
 AimbotGroup:AddSlider("Circle Size", 50, 500, Config.Aimbot.FOV, "", function(val)
@@ -1304,10 +1455,19 @@ ExtraAimbotGroup:AddToggle("Wall Check", Config.Aimbot.WallCheck, { Callback = f
 ExtraAimbotGroup:AddToggle("Prioritize Low Health", Config.Aimbot.LowHealth, { Callback = function(v) Config.Aimbot.LowHealth = v end })
 
 local SilentGroup = MainTab:CreateGroupbox("Silent Aim", "Right")
+local silentKeyHolder = nil
+
 SilentGroup:AddToggle("Enabled", Config.SilentAim.Enabled, {
     Keybind = Config.SilentAim.Key,
+    OnKeyChanged = function(k)
+        Config.SilentAim.Key = k
+        if silentKeyHolder then silentKeyHolder.SetKey(k) end
+    end,
     Callback = function(v) Config.SilentAim.Enabled = v end
 })
+silentKeyHolder = SilentGroup:AddKeybind("Silent key", Config.SilentAim.Key, function(k)
+    Config.SilentAim.Key = k
+end)
 SilentGroup:AddSlider("Circle Size", 50, 600, Config.SilentAim.FOV, "", function(val)
     Config.SilentAim.FOV = val
     if FOVCircles.SilentAim then FOVCircles.SilentAim.Radius = val end
@@ -1479,8 +1639,25 @@ RunService.RenderStepped:Connect(function()
         UserInputService.MouseIconEnabled = true
     end
 
+    local function isInputActive(bind)
+        if not bind then return true end
+        if typeof(bind) == "EnumItem" then
+            if bind.EnumType == Enum.KeyCode then
+                return UserInputService:IsKeyDown(bind)
+            elseif bind.EnumType == Enum.UserInputType then
+                return UserInputService:IsMouseButtonPressed(bind)
+            end
+        end
+        return false
+    end
+
     -- 2. Silent Aim Target Tracker
-    if Config.SilentAim.Enabled then
+    local silentActive = Config.SilentAim.Enabled
+    if silentActive and Config.SilentAim.Key ~= nil then
+        silentActive = isInputActive(Config.SilentAim.Key)
+    end
+
+    if silentActive then
         local maxD = Config.SilentAim.DistanceLimit and Config.SilentAim.MaxDistance or nil
         local target = findBestTarget(Config.SilentAim.FOV, Config.SilentAim.Part, false, maxD)
         currentSilentTargetBone = target and target.Bone or nil
@@ -1488,8 +1665,8 @@ RunService.RenderStepped:Connect(function()
         currentSilentTargetBone = nil
     end
 
-    -- 3. Camera Aimbot Loop
-    if Config.Aimbot.Enabled and (UserInputService:IsKeyDown(Config.Aimbot.Key) or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)) then
+    -- 3. Aimbot Loop (Camera & Mouse Rel)
+    if Config.Aimbot.Enabled and isInputActive(Config.Aimbot.Key) then
         local aimTarget = findBestTarget(Config.Aimbot.FOV, Config.Aimbot.Part, Config.Aimbot.WallCheck)
         if aimTarget and aimTarget.Bone then
             local targetPos = aimTarget.Bone.Position
@@ -1506,10 +1683,17 @@ RunService.RenderStepped:Connect(function()
                 end
             end
 
-            local currentCF = Camera.CFrame
-            local targetCF = CFrame.new(currentCF.Position, targetPos)
-            local smoothFactor = math.clamp(1 / math.max(Config.Aimbot.Smoothing, 1), 0.05, 1)
-            Camera.CFrame = currentCF:Lerp(targetCF, smoothFactor)
+            if Config.Aimbot.Mode == "Mouse" and typeof(mousemoverel) == "function" then
+                local mousePos = UserInputService:GetMouseLocation()
+                local delta = aimTarget.ScreenPos - mousePos
+                local smooth = math.max(Config.Aimbot.Smoothing, 1)
+                mousemoverel(delta.X / smooth, delta.Y / smooth)
+            else
+                local currentCF = Camera.CFrame
+                local targetCF = CFrame.new(currentCF.Position, targetPos)
+                local smoothFactor = math.clamp(1 / math.max(Config.Aimbot.Smoothing, 1), 0.05, 1)
+                Camera.CFrame = currentCF:Lerp(targetCF, smoothFactor)
+            end
         end
     end
 
