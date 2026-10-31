@@ -1,14 +1,11 @@
 --!strict
 --[[
     silent.cc UI Framework
-    Top-Navbar Dual-Column Architecture (Inspired by classic competitive cheat menus)
-    Features:
-    - Pure Vector & Text rendering (No external image assets)
-    - Embedded slider text (value displayed centered inside the progress track)
-    - Checkbox with inline Keybind selector
-    - Color swatch controls
-    - Dropdowns with overlay priority
-    - Dragging & Keybind toggle
+    Top-Navbar Dual-Column Architecture (Expanded Geometry & Pure LayoutOrder)
+    Updates:
+    - Removed minimize (_) and close (X) buttons for clean minimalistic header
+    - Expanded window geometry (680x720) for optimal spacing
+    - Fixed element ordering: strictly uses LayoutOrder instead of alphabetical sort
 ]]
 
 local UserInputService = game:GetService("UserInputService")
@@ -33,8 +30,8 @@ Library.Theme = {
     TabInactiveText = Color3.fromRGB(130, 130, 140),
     TabActiveText = Color3.fromRGB(255, 255, 255),
 
-    Accent = Color3.fromRGB(120, 87, 255),       -- Havoc Tactical Violet
-    AccentSecondary = Color3.fromRGB(0, 140, 255), -- Electric Cyan/Blue
+    Accent = Color3.fromRGB(0, 110, 255),
+    AccentSecondary = Color3.fromRGB(120, 87, 255),
 
     GroupboxBg = Color3.fromRGB(16, 16, 20),
     GroupboxBorder = Color3.fromRGB(32, 32, 38),
@@ -45,10 +42,10 @@ Library.Theme = {
 
     InputBg = Color3.fromRGB(10, 10, 12),
     InputBorder = Color3.fromRGB(38, 38, 46),
-    InputActive = Color3.fromRGB(120, 87, 255),
+    InputActive = Color3.fromRGB(0, 110, 255),
 
     SliderTrack = Color3.fromRGB(12, 12, 15),
-    SliderFill = Color3.fromRGB(120, 87, 255),
+    SliderFill = Color3.fromRGB(0, 110, 255),
     SliderText = Color3.fromRGB(255, 255, 255),
 }
 
@@ -119,7 +116,7 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
     local title = config.Title or "silent.cc"
     local gameName = config.Game or "Havoc"
     local link = config.Link or "discord.gg/silentcc"
-    local windowSize = config.Size or Vector2.new(580, 600)
+    local windowSize = config.Size or Vector2.new(680, 720)
     local toggleKey = config.ToggleKey or Enum.KeyCode.RightShift
 
     local screenGui = Instance.new("ScreenGui")
@@ -129,7 +126,6 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
     screenGui.DisplayOrder = 999999
     screenGui.Parent = getSafeParent()
 
-    -- Master Window Frame
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainWindow"
     mainFrame.Size = UDim2.new(0, windowSize.X, 0, windowSize.Y)
@@ -145,24 +141,23 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
     windowStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     windowStroke.Parent = mainFrame
 
-    -- Outer Dark Rim
     local outerBorder = Instance.new("UIStroke")
     outerBorder.Color = Library.Theme.WindowBorder
     outerBorder.Thickness = 1
     outerBorder.Parent = mainFrame
 
-    -- Header / Title Bar
+    -- Header / Title Bar (Clean, without _ and X)
     local titleBar = Instance.new("Frame")
     titleBar.Name = "TitleBar"
-    titleBar.Size = UDim2.new(1, 0, 0, 26)
+    titleBar.Size = UDim2.new(1, 0, 0, 28)
     titleBar.BackgroundColor3 = Library.Theme.TitlebarBg
     titleBar.BorderSizePixel = 0
     titleBar.Parent = mainFrame
 
     local titleLabel = Instance.new("TextLabel")
     titleLabel.Name = "TitleLabel"
-    titleLabel.Size = UDim2.new(1, -60, 1, 0)
-    titleLabel.Position = UDim2.new(0, 10, 0, 0)
+    titleLabel.Size = UDim2.new(1, -20, 1, 0)
+    titleLabel.Position = UDim2.new(0, 12, 0, 0)
     titleLabel.BackgroundTransparency = 1
     titleLabel.Font = Enum.Font.RobotoMono
     titleLabel.TextSize = 12
@@ -170,31 +165,6 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
     titleLabel.TextXAlignment = Enum.TextXAlignment.Left
     titleLabel.Text = string.format("%s  |  %s  |  %s", title, gameName, link)
     titleLabel.Parent = titleBar
-
-    -- Action Buttons (Text only)
-    local minBtn = Instance.new("TextButton")
-    minBtn.Name = "MinBtn"
-    minBtn.Size = UDim2.new(0, 20, 0, 18)
-    minBtn.Position = UDim2.new(1, -46, 0, 4)
-    minBtn.BackgroundColor3 = Library.Theme.InputBg
-    minBtn.BorderSizePixel = 0
-    minBtn.Font = Enum.Font.RobotoMono
-    minBtn.TextSize = 12
-    minBtn.TextColor3 = Library.Theme.MutedText
-    minBtn.Text = "_"
-    minBtn.Parent = titleBar
-
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Name = "CloseBtn"
-    closeBtn.Size = UDim2.new(0, 20, 0, 18)
-    closeBtn.Position = UDim2.new(1, -24, 0, 4)
-    closeBtn.BackgroundColor3 = Library.Theme.InputBg
-    closeBtn.BorderSizePixel = 0
-    closeBtn.Font = Enum.Font.RobotoMono
-    closeBtn.TextSize = 11
-    closeBtn.TextColor3 = Library.Theme.MutedText
-    closeBtn.Text = "X"
-    closeBtn.Parent = titleBar
 
     makeDraggable(titleBar, mainFrame)
 
@@ -206,20 +176,11 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
         end
     end)
 
-    minBtn.MouseButton1Click:Connect(function()
-        isVisible = false
-        mainFrame.Visible = false
-    end)
-
-    closeBtn.MouseButton1Click:Connect(function()
-        screenGui:Destroy()
-    end)
-
     -- Top Navigation Bar
     local navBar = Instance.new("Frame")
     navBar.Name = "NavBar"
-    navBar.Size = UDim2.new(1, -16, 0, 28)
-    navBar.Position = UDim2.new(0, 8, 0, 28)
+    navBar.Size = UDim2.new(1, -20, 0, 30)
+    navBar.Position = UDim2.new(0, 10, 0, 30)
     navBar.BackgroundColor3 = Library.Theme.NavbarBg
     navBar.BorderSizePixel = 0
     navBar.Parent = mainFrame
@@ -228,23 +189,22 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
     navLayout.FillDirection = Enum.FillDirection.Horizontal
     navLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
     navLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+    navLayout.SortOrder = Enum.SortOrder.LayoutOrder
     navLayout.Padding = UDim.new(0, 6)
     navLayout.Parent = navBar
 
-    -- Horizontal Accent Bar underneath Nav
     local navAccentLine = Instance.new("Frame")
     navAccentLine.Name = "NavAccentLine"
-    navAccentLine.Size = UDim2.new(1, -16, 0, 1)
-    navAccentLine.Position = UDim2.new(0, 8, 0, 58)
+    navAccentLine.Size = UDim2.new(1, -20, 0, 1)
+    navAccentLine.Position = UDim2.new(0, 10, 0, 62)
     navAccentLine.BackgroundColor3 = Library.Theme.Accent
     navAccentLine.BorderSizePixel = 0
     navAccentLine.Parent = mainFrame
 
-    -- Content Viewport
     local contentArea = Instance.new("Frame")
     contentArea.Name = "ContentArea"
-    contentArea.Size = UDim2.new(1, -16, 1, -66)
-    contentArea.Position = UDim2.new(0, 8, 0, 62)
+    contentArea.Size = UDim2.new(1, -20, 1, -72)
+    contentArea.Position = UDim2.new(0, 10, 0, 66)
     contentArea.BackgroundTransparency = 1
     contentArea.Parent = mainFrame
 
@@ -258,10 +218,10 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
     function Window:CreateTab(tabName: string)
         local tabIndex = #Window.Tabs + 1
 
-        -- Tab Button
         local tabBtn = Instance.new("TextButton")
         tabBtn.Name = "TabBtn_" .. tabName
-        tabBtn.Size = UDim2.new(0, 70, 0, 22)
+        tabBtn.Size = UDim2.new(0, 85, 0, 24)
+        tabBtn.LayoutOrder = tabIndex
         tabBtn.BackgroundColor3 = Library.Theme.NavbarBg
         tabBtn.BorderSizePixel = 0
         tabBtn.Font = Enum.Font.RobotoMono
@@ -277,7 +237,6 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
         tabStroke.Enabled = false
         tabStroke.Parent = tabBtn
 
-        -- Tab Content Scrolling Area
         local tabContent = Instance.new("ScrollingFrame")
         tabContent.Name = "TabContent_" .. tabName
         tabContent.Size = UDim2.new(1, 0, 1, 0)
@@ -290,7 +249,6 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
         tabContent.Visible = false
         tabContent.Parent = contentArea
 
-        -- Dual Columns Container
         local columns = Instance.new("Frame")
         columns.Name = "Columns"
         columns.Size = UDim2.new(1, 0, 0, 0)
@@ -300,7 +258,7 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
 
         local leftCol = Instance.new("Frame")
         leftCol.Name = "LeftCol"
-        leftCol.Size = UDim2.new(0.5, -4, 0, 0)
+        leftCol.Size = UDim2.new(0.5, -6, 0, 0)
         leftCol.Position = UDim2.new(0, 0, 0, 0)
         leftCol.AutomaticSize = Enum.AutomaticSize.Y
         leftCol.BackgroundTransparency = 1
@@ -308,20 +266,22 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
 
         local leftLayout = Instance.new("UIListLayout")
         leftLayout.FillDirection = Enum.FillDirection.Vertical
-        leftLayout.Padding = UDim.new(0, 8)
+        leftLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        leftLayout.Padding = UDim.new(0, 10)
         leftLayout.Parent = leftCol
 
         local rightCol = Instance.new("Frame")
         rightCol.Name = "RightCol"
-        rightCol.Size = UDim2.new(0.5, -4, 0, 0)
-        rightCol.Position = UDim2.new(0.5, 4, 0, 0)
+        rightCol.Size = UDim2.new(0.5, -6, 0, 0)
+        rightCol.Position = UDim2.new(0.5, 6, 0, 0)
         rightCol.AutomaticSize = Enum.AutomaticSize.Y
         rightCol.BackgroundTransparency = 1
         rightCol.Parent = columns
 
         local rightLayout = Instance.new("UIListLayout")
         rightLayout.FillDirection = Enum.FillDirection.Vertical
-        rightLayout.Padding = UDim.new(0, 8)
+        rightLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        rightLayout.Padding = UDim.new(0, 10)
         rightLayout.Parent = rightCol
 
         local tabData = {
@@ -356,12 +316,15 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
         table.insert(Window.Tabs, tabData)
 
         local Tab = {}
+        local groupboxCount = 0
 
         function Tab:CreateGroupbox(title: string, columnSide: "Left" | "Right"?)
+            groupboxCount += 1
             local parentCol = (columnSide == "Right") and rightCol or leftCol
 
             local groupbox = Instance.new("Frame")
-            groupbox.Name = "Group_" .. title
+            groupbox.Name = "Group_" .. tostring(groupboxCount) .. "_" .. title
+            groupbox.LayoutOrder = groupboxCount
             groupbox.Size = UDim2.new(1, 0, 0, 0)
             groupbox.AutomaticSize = Enum.AutomaticSize.Y
             groupbox.BackgroundColor3 = Library.Theme.GroupboxBg
@@ -374,11 +337,10 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
             groupStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
             groupStroke.Parent = groupbox
 
-            -- Groupbox Title Label
             local groupTitle = Instance.new("TextLabel")
             groupTitle.Name = "GroupTitle"
-            groupTitle.Size = UDim2.new(1, -16, 0, 20)
-            groupTitle.Position = UDim2.new(0, 8, 0, 4)
+            groupTitle.Size = UDim2.new(1, -16, 0, 22)
+            groupTitle.Position = UDim2.new(0, 10, 0, 4)
             groupTitle.BackgroundTransparency = 1
             groupTitle.Font = Enum.Font.RobotoMono
             groupTitle.TextSize = 12
@@ -389,32 +351,39 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
 
             local itemsContainer = Instance.new("Frame")
             itemsContainer.Name = "Items"
-            itemsContainer.Size = UDim2.new(1, -16, 0, 0)
-            itemsContainer.Position = UDim2.new(0, 8, 0, 26)
+            itemsContainer.Size = UDim2.new(1, -20, 0, 0)
+            itemsContainer.Position = UDim2.new(0, 10, 0, 28)
             itemsContainer.AutomaticSize = Enum.AutomaticSize.Y
             itemsContainer.BackgroundTransparency = 1
             itemsContainer.Parent = groupbox
 
             local itemsLayout = Instance.new("UIListLayout")
             itemsLayout.FillDirection = Enum.FillDirection.Vertical
-            itemsLayout.Padding = UDim.new(0, 6)
+            itemsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            itemsLayout.Padding = UDim.new(0, 7)
             itemsLayout.Parent = itemsContainer
 
             local bottomPad = Instance.new("UIPadding")
-            bottomPad.PaddingBottom = UDim.new(0, 8)
+            bottomPad.PaddingBottom = UDim.new(0, 10)
             bottomPad.Parent = itemsContainer
 
             local Group = {}
+            local itemOrder = 0
 
-            -- Checkbox / Toggle (Optionally with inline Keybind selector)
-            function Group:AddToggle(label: string, default: boolean, options: { Keybind: Enum.KeyCode?, Callback: ((boolean) -> ())? })
+            local function nextOrder(): number
+                itemOrder += 1
+                return itemOrder
+            end
+
+            function Group:AddToggle(label: string, default: boolean, options: { Keybind: Enum.KeyCode?, Callback: ((boolean) -> ())? }?)
                 local state = default or false
                 local keybind = options and options.Keybind or nil
                 local callback = options and options.Callback
 
                 local row = Instance.new("Frame")
-                row.Name = "ToggleRow_" .. label
-                row.Size = UDim2.new(1, 0, 0, 18)
+                row.Name = "Toggle_" .. label
+                row.LayoutOrder = nextOrder()
+                row.Size = UDim2.new(1, 0, 0, 19)
                 row.BackgroundTransparency = 1
                 row.Parent = itemsContainer
 
@@ -435,8 +404,8 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
 
                 local textBtn = Instance.new("TextButton")
                 textBtn.Name = "LabelBtn"
-                textBtn.Size = UDim2.new(1, -60, 1, 0)
-                textBtn.Position = UDim2.new(0, 20, 0, 0)
+                textBtn.Size = UDim2.new(1, -55, 1, 0)
+                textBtn.Position = UDim2.new(0, 22, 0, 0)
                 textBtn.BackgroundTransparency = 1
                 textBtn.Font = Enum.Font.RobotoMono
                 textBtn.TextSize = 11
@@ -445,12 +414,11 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
                 textBtn.Text = label
                 textBtn.Parent = row
 
-                local keybindBtn: TextButton? = nil
                 if keybind then
-                    keybindBtn = Instance.new("TextButton")
+                    local keybindBtn = Instance.new("TextButton")
                     keybindBtn.Name = "Keybind"
-                    keybindBtn.Size = UDim2.new(0, 32, 0, 16)
-                    keybindBtn.Position = UDim2.new(1, -32, 0.5, -8)
+                    keybindBtn.Size = UDim2.new(0, 28, 0, 16)
+                    keybindBtn.Position = UDim2.new(1, -28, 0.5, -8)
                     keybindBtn.BackgroundColor3 = Library.Theme.InputBg
                     keybindBtn.BorderSizePixel = 0
                     keybindBtn.Font = Enum.Font.RobotoMono
@@ -472,13 +440,11 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
                     end)
 
                     UserInputService.InputBegan:Connect(function(input, gpe)
-                        if listening and not gpe then
-                            if input.UserInputType == Enum.UserInputType.Keyboard then
-                                keybind = input.KeyCode
-                                keybindBtn.Text = keybind.Name
-                                keybindBtn.TextColor3 = Library.Theme.MutedText
-                                listening = false
-                            end
+                        if listening and not gpe and input.UserInputType == Enum.UserInputType.Keyboard then
+                            keybind = input.KeyCode
+                            keybindBtn.Text = keybind.Name
+                            keybindBtn.TextColor3 = Library.Theme.MutedText
+                            listening = false
                         end
                     end)
                 end
@@ -508,14 +474,14 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
                 }
             end
 
-            -- Classic Slider with Embedded Value Text in Track
             function Group:AddSlider(label: string, min: number, max: number, default: number, unit: string?, callback: ((number) -> ())?)
                 local currentVal = math.clamp(default or min, min, max)
                 local u = unit or ""
 
                 local sliderContainer = Instance.new("Frame")
                 sliderContainer.Name = "Slider_" .. label
-                sliderContainer.Size = UDim2.new(1, 0, 0, 32)
+                sliderContainer.LayoutOrder = nextOrder()
+                sliderContainer.Size = UDim2.new(1, 0, 0, 34)
                 sliderContainer.BackgroundTransparency = 1
                 sliderContainer.Parent = itemsContainer
 
@@ -530,11 +496,10 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
                 labelText.Text = label
                 labelText.Parent = sliderContainer
 
-                -- Slider Track
                 local track = Instance.new("Frame")
                 track.Name = "Track"
-                track.Size = UDim2.new(1, 0, 0, 14)
-                track.Position = UDim2.new(0, 0, 0, 16)
+                track.Size = UDim2.new(1, 0, 0, 15)
+                track.Position = UDim2.new(0, 0, 0, 17)
                 track.BackgroundColor3 = Library.Theme.SliderTrack
                 track.BorderSizePixel = 0
                 track.Parent = sliderContainer
@@ -552,7 +517,6 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
                 fill.BorderSizePixel = 0
                 fill.Parent = track
 
-                -- Centered Embedded Value Label
                 local valueText = Instance.new("TextLabel")
                 valueText.Name = "Value"
                 valueText.Size = UDim2.new(1, 0, 1, 0)
@@ -613,14 +577,14 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
                 }
             end
 
-            -- Dropdown Menu
             function Group:AddDropdown(label: string, items: { string }, default: string?, callback: ((string) -> ())?)
                 local selected = default or items[1] or "None"
                 local isOpen = false
 
                 local dropContainer = Instance.new("Frame")
                 dropContainer.Name = "Dropdown_" .. label
-                dropContainer.Size = UDim2.new(1, 0, 0, 38)
+                dropContainer.LayoutOrder = nextOrder()
+                dropContainer.Size = UDim2.new(1, 0, 0, 40)
                 dropContainer.BackgroundTransparency = 1
                 dropContainer.ClipsDescendants = false
                 dropContainer.ZIndex = 10
@@ -639,7 +603,7 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
 
                 local dropBtn = Instance.new("TextButton")
                 dropBtn.Name = "SelectBox"
-                dropBtn.Size = UDim2.new(1, 0, 0, 20)
+                dropBtn.Size = UDim2.new(1, 0, 0, 22)
                 dropBtn.Position = UDim2.new(0, 0, 0, 16)
                 dropBtn.BackgroundColor3 = Library.Theme.InputBg
                 dropBtn.BorderSizePixel = 0
@@ -669,7 +633,7 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
 
                 local optionsFrame = Instance.new("Frame")
                 optionsFrame.Name = "Options"
-                optionsFrame.Size = UDim2.new(1, 0, 0, #items * 20)
+                optionsFrame.Size = UDim2.new(1, 0, 0, #items * 22)
                 optionsFrame.Position = UDim2.new(0, 0, 1, 2)
                 optionsFrame.BackgroundColor3 = Library.Theme.GroupboxBg
                 optionsFrame.BorderSizePixel = 0
@@ -684,12 +648,14 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
 
                 local optLayout = Instance.new("UIListLayout")
                 optLayout.FillDirection = Enum.FillDirection.Vertical
+                optLayout.SortOrder = Enum.SortOrder.LayoutOrder
                 optLayout.Parent = optionsFrame
 
-                for _, item in ipairs(items) do
+                for idx, item in ipairs(items) do
                     local opt = Instance.new("TextButton")
                     opt.Name = "Item_" .. item
-                    opt.Size = UDim2.new(1, 0, 0, 20)
+                    opt.LayoutOrder = idx
+                    opt.Size = UDim2.new(1, 0, 0, 22)
                     opt.BackgroundColor3 = Library.Theme.GroupboxBg
                     opt.BorderSizePixel = 0
                     opt.Font = Enum.Font.RobotoMono
@@ -724,13 +690,13 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
                 }
             end
 
-            -- Color Swatch Selector
             function Group:AddColorPicker(label: string, default: Color3, callback: ((Color3) -> ())?)
                 local currentColor = default or Color3.fromRGB(0, 255, 170)
 
                 local colorRow = Instance.new("Frame")
                 colorRow.Name = "ColorRow_" .. label
-                colorRow.Size = UDim2.new(1, 0, 0, 20)
+                colorRow.LayoutOrder = nextOrder()
+                colorRow.Size = UDim2.new(1, 0, 0, 22)
                 colorRow.BackgroundTransparency = 1
                 colorRow.Parent = itemsContainer
 
@@ -747,8 +713,8 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
 
                 local colorPreview = Instance.new("TextButton")
                 colorPreview.Name = "Preview"
-                colorPreview.Size = UDim2.new(0, 36, 0, 14)
-                colorPreview.Position = UDim2.new(1, -36, 0.5, -7)
+                colorPreview.Size = UDim2.new(0, 38, 0, 16)
+                colorPreview.Position = UDim2.new(1, -38, 0.5, -8)
                 colorPreview.BackgroundColor3 = currentColor
                 colorPreview.BorderSizePixel = 0
                 colorPreview.Text = ""
@@ -771,11 +737,11 @@ function Library.CreateWindow(config: { Title: string, Game: string?, Link: stri
                 }
             end
 
-            -- Action Button
             function Group:AddButton(label: string, callback: (() -> ())?)
                 local btn = Instance.new("TextButton")
                 btn.Name = "Btn_" .. label
-                btn.Size = UDim2.new(1, 0, 0, 22)
+                btn.LayoutOrder = nextOrder()
+                btn.Size = UDim2.new(1, 0, 0, 24)
                 btn.BackgroundColor3 = Library.Theme.InputBg
                 btn.BorderSizePixel = 0
                 btn.Font = Enum.Font.RobotoMono

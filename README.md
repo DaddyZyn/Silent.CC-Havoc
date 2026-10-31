@@ -1,28 +1,39 @@
 # Silent.CC // Havoc [Season 2]
 
-A high-performance Luau tactical client menu for **Havoc**, built with an authentic C++ ImGui top-navbar architecture, zero image asset dependencies, and low-latency input telemetry.
+A high-performance Luau tactical client menu for **Havoc**, built with an authentic C++ ImGui top-navbar architecture, zero image asset dependencies, expanded 680x720 geometry, and low-latency input telemetry.
 
 ## Quick Loadstring
 
 To execute `silent.cc` directly in your environment, run:
 
 ```lua
-loadstring(game:HttpGet("https://raw.githubusercontent.com/DaddyZyn/Silent.CC-Havoc/main/dist/silent_cc.luau"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/DaddyZyn/Silent.CC-Havoc/main/dist/silent_cc.luau", true))()
 ```
 
 Or using the root loader:
 
 ```lua
-loadstring(game:HttpGet("https://raw.githubusercontent.com/DaddyZyn/Silent.CC-Havoc/main/init.luau"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/DaddyZyn/Silent.CC-Havoc/main/init.luau", true))()
 ```
+
+---
+
+## Havoc Introspection Dumper
+
+To dump network remotes, weapon modules, GC tables, and bone rigs for Havoc reverse engineering:
+
+```lua
+loadstring(game:HttpGet("https://raw.githubusercontent.com/DaddyZyn/Silent.CC-Havoc/main/dumper.luau", true))()
+```
+*Outputs to `havoc_dump.json` in your executor's workspace folder and copies raw JSON directly to clipboard.*
 
 ---
 
 ## Architecture & Controls
 
 * **Toggle Menu**: `[RightShift]` (rebindable)
-* **Titlebar**: Fully draggable across viewports
-* **Top Navigation Bar**: Instant tab switching (`Main`, `Esp`, `Visuals`, `Character`, `settings`)
+* **Titlebar**: Fully draggable across viewports (clean minimal header, no action buttons)
+* **Top Navigation Bar**: Sequential tab switching (`Main`, `Esp`, `Visuals`, `Character`, `settings`)
 * **Dual-Column Panels**:
   * **Main**: Aimbot & Silent Aim engines, FOV Circles, Hit Parts, Smoothing, Lead Prediction, Sticky Aim
   * **Esp**: 2D Bounding Boxes, Health Indicators, Snaplines, Distance & Name tags
@@ -35,10 +46,11 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/DaddyZyn/Silent.CC-Ha
 ## Repository Structure
 
 ```
-├── init.luau             # Root loader for raw loadstring execution
+├── init.luau             # Root loader with 404 validation
+├── dumper.luau           # Client introspection & weapon dumper
 ├── README.md             # Documentation and usage instructions
 ├── dist/
-│   └── silent_cc.luau    # Consolidated standalone client bundle
+│   └── silent_cc.luau    # Expanded standalone client bundle (680x720)
 └── src/
     ├── main.luau         # Modular Havoc controller
     └── ui/
