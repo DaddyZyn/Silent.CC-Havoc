@@ -1,5 +1,5 @@
 --[[
-    silent.cc | Havoc [Season 2] | discord.gg/silentcc
+    snow.cc | Havoc [Season 2] | discord.gg/snowcc
     Full Operational Client:
     - Safe Global Environment Resolution (Resolves getgenv, _G, and getfenv safely)
     - Auto Mouse Unlocker (__newindex metamethod hook + RenderStepped enforcement; zero ESC required)
@@ -489,7 +489,7 @@ local function getSafeParent()
     if success and coreGui then return coreGui end
 
     if LocalPlayer then return LocalPlayer:WaitForChild("PlayerGui") end
-    error("[silent.cc] Failed to find UI container.")
+    error("[snow.cc] Failed to find UI container.")
 end
 
 local function makeDraggable(dragHandle, container)
@@ -520,9 +520,9 @@ local function makeDraggable(dragHandle, container)
 end
 
 function Library.CreateWindow(config)
-    local title = config.Title or "silent.cc"
+    local title = config.Title or "snow.cc"
     local gameName = config.Game or "Havoc"
-    local link = config.Link or "discord.gg/silentcc"
+    local link = config.Link or "discord.gg/snowcc"
     local windowSize = config.Size or Vector2.new(680, 720)
     local toggleKey = config.ToggleKey or Enum.KeyCode.RightShift
 
@@ -620,7 +620,7 @@ function Library.CreateWindow(config)
     titleLabel.TextSize = 15
     titleLabel.TextColor3 = Library.Theme.TitlebarText
     titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    titleLabel.Text = "havoc.dead"
+    titleLabel.Text = "snow.cc"
     titleLabel.Parent = titleBar
 
     makeDraggable(titleBar, mainFrame)
@@ -2440,9 +2440,9 @@ end
 -- SECTION 9: MENU INITIALIZATION & SPLASH INTRO
 -- =========================================================================
 local Window = Library.CreateWindow({
-    Title = "silent.cc",
+    Title = "snow.cc",
     Game = "Havoc",
-    Link = "discord.gg/silentcc",
+    Link = "discord.gg/snowcc",
     Size = Vector2.new(680, 720),
     ToggleKey = Enum.KeyCode.RightShift,
 })
@@ -2500,7 +2500,7 @@ task.spawn(function()
     titleLbl.TextSize = 16
     titleLbl.TextColor3 = Color3.fromRGB(245, 245, 250)
     titleLbl.TextTransparency = 1
-    titleLbl.Text = "Silent.cc Havoc"
+    titleLbl.Text = "Snow.cc Havoc"
     titleLbl.Parent = introCard
 
     local statusLbl = Instance.new("TextLabel")
@@ -2756,11 +2756,11 @@ WeaponGroup:AddToggle("Spread Reduction", Config.Character.NoSpread, { Callback 
 local SettingsTab = Window:CreateTab("Settings")
 
 local ProfileGroup = SettingsTab:CreateGroupbox("Profile Manager", "Left")
-ProfileGroup:AddButton("Save Default Config", function() print("[silent.cc] Saved config profile.") end)
-ProfileGroup:AddButton("Load Default Config", function() print("[silent.cc] Loaded config profile.") end)
+ProfileGroup:AddButton("Save Default Config", function() print("[snow.cc] Saved config profile.") end)
+ProfileGroup:AddButton("Load Default Config", function() print("[snow.cc] Loaded config profile.") end)
 
 local SystemGroup = SettingsTab:CreateGroupbox("System", "Right")
-SystemGroup:AddButton("Unload silent.cc", function()
+SystemGroup:AddButton("Unload snow.cc", function()
     if FOVCircles.Aimbot then FOVCircles.Aimbot:Remove() end
     if FOVCircles.SilentAim then FOVCircles.SilentAim:Remove() end
     for m, _ in pairs(DrawingEspPool) do cleanupModelEsp(m) end
@@ -3399,4 +3399,4 @@ task.spawn(function()
     end
 end)
 
-print("[silent.cc] Havoc client operational: Dual ESP, Auto Mouse Unlock, Universal Scanner active.")
+print("[snow.cc] Havoc client operational: Dual ESP, Auto Mouse Unlock, Universal Scanner active.")
