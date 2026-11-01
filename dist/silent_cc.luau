@@ -822,6 +822,7 @@ function Library.CreateWindow(config)
         local tabContent = Instance.new("ScrollingFrame")
         tabContent.Name = "TabContent_" .. tabName
         tabContent.Size = UDim2.new(1, 0, 1, 0)
+        tabContent.Position = UDim2.new(0, 0, 0, 0)
         tabContent.BackgroundTransparency = 1
         tabContent.BorderSizePixel = 0
         tabContent.ScrollBarThickness = 2
@@ -829,14 +830,25 @@ function Library.CreateWindow(config)
         tabContent.CanvasSize = UDim2.new(0, 0, 0, 0)
         tabContent.AutomaticCanvasSize = Enum.AutomaticSize.Y
         tabContent.Visible = false
+        tabContent.ClipsDescendants = true
         tabContent.Parent = contentArea
+
+        local tabCanvasGroup = Instance.new("CanvasGroup")
+        tabCanvasGroup.Name = "TabCanvasGroup"
+        tabCanvasGroup.Size = UDim2.new(1, 0, 0, 0)
+        tabCanvasGroup.AutomaticSize = Enum.AutomaticSize.Y
+        tabCanvasGroup.Position = UDim2.new(0, 0, 0, 0)
+        tabCanvasGroup.BackgroundTransparency = 1
+        tabCanvasGroup.GroupTransparency = 0
+        tabCanvasGroup.BorderSizePixel = 0
+        tabCanvasGroup.Parent = tabContent
 
         local columns = Instance.new("Frame")
         columns.Name = "Columns"
         columns.Size = UDim2.new(1, 0, 0, 0)
         columns.AutomaticSize = Enum.AutomaticSize.Y
         columns.BackgroundTransparency = 1
-        columns.Parent = tabContent
+        columns.Parent = tabCanvasGroup
 
         local leftCol = Instance.new("Frame")
         leftCol.Name = "LeftCol"
@@ -873,6 +885,7 @@ function Library.CreateWindow(config)
             GlowBar = tabGlowBar,
             Stroke = tabStroke,
             Content = tabContent,
+            Canvas = tabCanvasGroup,
             Left = leftCol,
             Right = rightCol,
         }
@@ -938,9 +951,26 @@ function Library.CreateWindow(config)
         end)
 
         local function selectTab()
+            if Window.CurrentTab == tabData then return end
+            local prevTab = Window.CurrentTab
+
             for _, t in ipairs(Window.Tabs) do
                 if t ~= tabData then
-                    t.Content.Visible = false
+                    if t == prevTab then
+                        local outTween = TweenService:Create(t.Canvas, TweenInfo.new(0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
+                            GroupTransparency = 1,
+                            Position = UDim2.new(0, -10, 0, 0)
+                        })
+                        outTween:Play()
+                        outTween.Completed:Connect(function()
+                            if Window.CurrentTab ~= t then
+                                t.Content.Visible = false
+                            end
+                        end)
+                    else
+                        t.Content.Visible = false
+                    end
+
                     TweenService:Create(t.Button, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
                         BackgroundTransparency = 1
                     }):Play()
@@ -957,7 +987,16 @@ function Library.CreateWindow(config)
                     }):Play()
                 end
             end
+
             tabData.Content.Visible = true
+            tabData.Canvas.Position = UDim2.new(0, 14, 0, 0)
+            tabData.Canvas.GroupTransparency = 1
+
+            TweenService:Create(tabData.Canvas, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                GroupTransparency = 0,
+                Position = UDim2.new(0, 0, 0, 0)
+            }):Play()
+
             updateTabAppearance(true, false)
             Window.CurrentTab = tabData
         end
@@ -1591,6 +1630,7 @@ function Library.CreateWindow(config)
 
             function Group:AddColorPicker(label, default, callback)
                 local currentColor = default or Color3.fromRGB(0, 255, 170)
+                local currentH, currentS, currentV = currentColor:ToHSV()
                 local order = nextOrder()
                 local isOpen = false
 
@@ -1631,112 +1671,391 @@ function Library.CreateWindow(config)
                 previewStroke.Thickness = 1
                 previewStroke.Parent = colorPreview
 
-                -- Interactive Color Picker Palette Popup
+                -- Professional Pro-Grade Color Picker Dialog Frame
                 local pickerPopup = Instance.new("Frame")
                 pickerPopup.Name = "ColorPopup_" .. label
-                pickerPopup.Size = UDim2.new(0, 170, 0, 110)
-                pickerPopup.BackgroundColor3 = Color3.fromRGB(14, 14, 18)
+                pickerPopup.Size = UDim2.new(0, 224, 0, 218)
+                pickerPopup.BackgroundColor3 = Color3.fromRGB(13, 13, 16)
                 pickerPopup.BorderSizePixel = 0
                 pickerPopup.Visible = false
                 pickerPopup.ZIndex = 9600
                 pickerPopup.Parent = Window.PopupOverlay
 
                 local pkCorner = Instance.new("UICorner")
-                pkCorner.CornerRadius = UDim.new(0, 5)
+                pkCorner.CornerRadius = UDim.new(0, 6)
                 pkCorner.Parent = pickerPopup
 
                 local pkStroke = Instance.new("UIStroke")
-                pkStroke.Color = Library.Theme.WindowStroke
+                pkStroke.Color = Color3.fromRGB(34, 34, 42)
                 pkStroke.Thickness = 1
                 pkStroke.Parent = pickerPopup
 
+                -- Outer drop shadow for color picker modal
+                local pkShadow = Instance.new("ImageLabel")
+                pkShadow.Name = "Shadow"
+                pkShadow.Size = UDim2.new(1, 24, 1, 24)
+                pkShadow.Position = UDim2.new(0, -12, 0, -12)
+                pkShadow.BackgroundTransparency = 1
+                pkShadow.Image = "rbxassetid://5028857084"
+                pkShadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+                pkShadow.ImageTransparency = 0.3
+                pkShadow.ScaleType = Enum.ScaleType.Slice
+                pkShadow.SliceCenter = Rect.new(24, 24, 276, 276)
+                pkShadow.ZIndex = 9599
+                pkShadow.Parent = pickerPopup
+
+                -- Top title bar
+                local pkHeader = Instance.new("Frame")
+                pkHeader.Size = UDim2.new(1, -16, 0, 22)
+                pkHeader.Position = UDim2.new(0, 8, 0, 6)
+                pkHeader.BackgroundTransparency = 1
+                pkHeader.ZIndex = 9601
+                pkHeader.Parent = pickerPopup
+
                 local pkTitle = Instance.new("TextLabel")
-                pkTitle.Size = UDim2.new(1, -12, 0, 18)
-                pkTitle.Position = UDim2.new(0, 8, 0, 4)
+                pkTitle.Size = UDim2.new(1, -26, 1, 0)
                 pkTitle.BackgroundTransparency = 1
                 pkTitle.Font = Library.Theme.FontTitle
-                pkTitle.TextSize = 10
-                pkTitle.TextColor3 = Library.Theme.LabelText
+                pkTitle.TextSize = 11
+                pkTitle.TextColor3 = Library.Theme.TitlebarText
                 pkTitle.TextXAlignment = Enum.TextXAlignment.Left
                 pkTitle.Text = label
                 pkTitle.ZIndex = 9601
-                pkTitle.Parent = pickerPopup
+                pkTitle.Parent = pkHeader
 
-                local paletteGrid = Instance.new("Frame")
-                paletteGrid.Size = UDim2.new(1, -16, 0, 48)
-                paletteGrid.Position = UDim2.new(0, 8, 0, 24)
-                paletteGrid.BackgroundTransparency = 1
-                paletteGrid.ZIndex = 9601
-                paletteGrid.Parent = pickerPopup
+                local curSwatch = Instance.new("Frame")
+                curSwatch.Size = UDim2.new(0, 16, 0, 16)
+                curSwatch.Position = UDim2.new(1, -16, 0.5, -8)
+                curSwatch.BackgroundColor3 = currentColor
+                curSwatch.BorderSizePixel = 0
+                curSwatch.ZIndex = 9601
+                curSwatch.Parent = pkHeader
 
-                local gridLayout = Instance.new("UIGridLayout")
-                gridLayout.CellSize = UDim2.new(0, 22, 0, 20)
-                gridLayout.CellPadding = UDim2.new(0, 4, 0, 4)
-                gridLayout.Parent = paletteGrid
+                local csCorner = Instance.new("UICorner")
+                csCorner.CornerRadius = UDim.new(0, 3)
+                csCorner.Parent = curSwatch
+
+                local csStroke = Instance.new("UIStroke")
+                csStroke.Color = Color3.fromRGB(45, 45, 55)
+                csStroke.Thickness = 1
+                csStroke.Parent = curSwatch
+
+                -- 1. Saturation / Value Canvas Field
+                local svField = Instance.new("TextButton")
+                svField.Name = "SVField"
+                svField.Size = UDim2.new(0, 178, 0, 100)
+                svField.Position = UDim2.new(0, 8, 0, 32)
+                svField.BackgroundColor3 = Color3.fromHSV(currentH, 1, 1)
+                svField.BorderSizePixel = 0
+                svField.AutoButtonColor = false
+                svField.Text = ""
+                svField.ClipsDescendants = true
+                svField.ZIndex = 9602
+                svField.Parent = pickerPopup
+
+                local svCorner = Instance.new("UICorner")
+                svCorner.CornerRadius = UDim.new(0, 4)
+                svCorner.Parent = svField
+
+                -- White gradient layer (Horizontal Saturation: Left White -> Right Clear)
+                local whiteGradLayer = Instance.new("Frame")
+                whiteGradLayer.Size = UDim2.new(1, 0, 1, 0)
+                whiteGradLayer.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                whiteGradLayer.BorderSizePixel = 0
+                whiteGradLayer.ZIndex = 9603
+                whiteGradLayer.Parent = svField
+
+                local wGrad = Instance.new("UIGradient")
+                wGrad.Transparency = NumberSequence.new({
+                    NumberSequenceKeypoint.new(0, 0),
+                    NumberSequenceKeypoint.new(1, 1)
+                })
+                wGrad.Rotation = 0
+                wGrad.Parent = whiteGradLayer
+
+                -- Black gradient layer (Vertical Value: Top Clear -> Bottom Black)
+                local blackGradLayer = Instance.new("Frame")
+                blackGradLayer.Size = UDim2.new(1, 0, 1, 0)
+                blackGradLayer.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+                blackGradLayer.BorderSizePixel = 0
+                blackGradLayer.ZIndex = 9604
+                blackGradLayer.Parent = svField
+
+                local bGrad = Instance.new("UIGradient")
+                bGrad.Transparency = NumberSequence.new({
+                    NumberSequenceKeypoint.new(0, 1),
+                    NumberSequenceKeypoint.new(1, 0)
+                })
+                bGrad.Rotation = 90
+                bGrad.Parent = blackGradLayer
+
+                -- SV Target Reticle Marker
+                local svCursor = Instance.new("Frame")
+                svCursor.Name = "Cursor"
+                svCursor.Size = UDim2.new(0, 8, 0, 8)
+                svCursor.AnchorPoint = Vector2.new(0.5, 0.5)
+                svCursor.Position = UDim2.new(currentS, 0, 1 - currentV, 0)
+                svCursor.BackgroundTransparency = 1
+                svCursor.ZIndex = 9606
+                svCursor.Parent = svField
+
+                local curCorner = Instance.new("UICorner")
+                curCorner.CornerRadius = UDim.new(1, 0)
+                curCorner.Parent = svCursor
+
+                local curStroke = Instance.new("UIStroke")
+                curStroke.Color = Color3.fromRGB(255, 255, 255)
+                curStroke.Thickness = 1.5
+                curStroke.Parent = svCursor
+
+                -- 2. Vertical Hue Rainbow Slider Bar
+                local hueBar = Instance.new("TextButton")
+                hueBar.Name = "HueBar"
+                hueBar.Size = UDim2.new(0, 18, 0, 100)
+                hueBar.Position = UDim2.new(0, 196, 0, 32)
+                hueBar.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                hueBar.BorderSizePixel = 0
+                hueBar.AutoButtonColor = false
+                hueBar.Text = ""
+                hueBar.ClipsDescendants = false
+                hueBar.ZIndex = 9602
+                hueBar.Parent = pickerPopup
+
+                local hCorner = Instance.new("UICorner")
+                hCorner.CornerRadius = UDim.new(0, 4)
+                hCorner.Parent = hueBar
+
+                local hGrad = Instance.new("UIGradient")
+                hGrad.Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 0, 0)),
+                    ColorSequenceKeypoint.new(0.17, Color3.fromRGB(255, 255, 0)),
+                    ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0, 255, 0)),
+                    ColorSequenceKeypoint.new(0.50, Color3.fromRGB(0, 255, 255)),
+                    ColorSequenceKeypoint.new(0.67, Color3.fromRGB(0, 0, 255)),
+                    ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255, 0, 255)),
+                    ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 0, 0))
+                })
+                hGrad.Rotation = 90
+                hGrad.Parent = hueBar
+
+                local hueCursor = Instance.new("Frame")
+                hueCursor.Name = "HueCursor"
+                hueCursor.Size = UDim2.new(1, 4, 0, 4)
+                hueCursor.Position = UDim2.new(0, -2, currentH, -2)
+                hueCursor.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                hueCursor.BorderSizePixel = 0
+                hueCursor.ZIndex = 9605
+                hueCursor.Parent = hueBar
+
+                local hcCorner = Instance.new("UICorner")
+                hcCorner.CornerRadius = UDim.new(0, 2)
+                hcCorner.Parent = hueCursor
+
+                local hcStroke = Instance.new("UIStroke")
+                hcStroke.Color = Color3.fromRGB(0, 0, 0)
+                hcStroke.Thickness = 1
+                hcStroke.Parent = hueCursor
+
+                -- 3. Preset Quick Swatches
+                local swatchRow = Instance.new("Frame")
+                swatchRow.Size = UDim2.new(1, -16, 0, 18)
+                swatchRow.Position = UDim2.new(0, 8, 0, 140)
+                swatchRow.BackgroundTransparency = 1
+                swatchRow.ZIndex = 9602
+                swatchRow.Parent = pickerPopup
+
+                local swLayout = Instance.new("UIListLayout")
+                swLayout.FillDirection = Enum.FillDirection.Horizontal
+                swLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+                swLayout.Padding = UDim.new(0, 5)
+                swLayout.Parent = swatchRow
 
                 local presets = {
-                    Color3.fromRGB(255, 255, 255), Color3.fromRGB(200, 200, 205),
-                    Color3.fromRGB(0, 200, 255),   Color3.fromRGB(0, 255, 170),
-                    Color3.fromRGB(255, 75, 75),   Color3.fromRGB(255, 180, 50),
-                    Color3.fromRGB(200, 100, 255), Color3.fromRGB(255, 90, 160),
-                    Color3.fromRGB(70, 70, 85),    Color3.fromRGB(255, 230, 80),
-                    Color3.fromRGB(50, 150, 255),  Color3.fromRGB(30, 220, 100),
+                    Color3.fromRGB(255, 255, 255),
+                    Color3.fromRGB(0, 200, 255),
+                    Color3.fromRGB(0, 255, 170),
+                    Color3.fromRGB(255, 75, 75),
+                    Color3.fromRGB(255, 180, 50),
+                    Color3.fromRGB(200, 100, 255),
+                    Color3.fromRGB(255, 230, 80),
+                    Color3.fromRGB(80, 80, 95),
                 }
 
-                local function applyColor(col)
-                    currentColor = col
-                    colorPreview.BackgroundColor3 = currentColor
-                    if callback then pcall(callback, currentColor) end
-                end
+                -- 4. Direct RGB & Hex Inputs
+                local inputRow = Instance.new("Frame")
+                inputRow.Size = UDim2.new(1, -16, 0, 24)
+                inputRow.Position = UDim2.new(0, 8, 0, 166)
+                inputRow.BackgroundTransparency = 1
+                inputRow.ZIndex = 9602
+                inputRow.Parent = pickerPopup
 
-                for _, col in ipairs(presets) do
-                    local cell = Instance.new("TextButton")
-                    cell.BackgroundColor3 = col
-                    cell.BorderSizePixel = 0
-                    cell.AutoButtonColor = false
-                    cell.Text = ""
-                    cell.ZIndex = 9602
-                    cell.Parent = paletteGrid
-
-                    local cCorner = Instance.new("UICorner")
-                    cCorner.CornerRadius = UDim.new(0, 3)
-                    cCorner.Parent = cell
-
-                    local cStroke = Instance.new("UIStroke")
-                    cStroke.Color = Color3.fromRGB(40, 40, 48)
-                    cStroke.Thickness = 1
-                    cStroke.Parent = cell
-
-                    cell.MouseButton1Click:Connect(function()
-                        applyColor(col)
-                    end)
-                end
-
-                -- RGB Hex / Value readout
                 local rgbBox = Instance.new("TextBox")
-                rgbBox.Size = UDim2.new(1, -16, 0, 22)
-                rgbBox.Position = UDim2.new(0, 8, 0, 78)
-                rgbBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+                rgbBox.Size = UDim2.new(0.65, -4, 1, 0)
+                rgbBox.Position = UDim2.new(0, 0, 0, 0)
+                rgbBox.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
                 rgbBox.BorderSizePixel = 0
                 rgbBox.Font = Library.Theme.FontBody
                 rgbBox.TextSize = 10
                 rgbBox.TextColor3 = Library.Theme.Accent
                 rgbBox.PlaceholderColor3 = Library.Theme.MutedText
-                rgbBox.PlaceholderText = "R, G, B (e.g. 255, 0, 0)"
+                rgbBox.PlaceholderText = "R, G, B"
                 rgbBox.Text = string.format("%d, %d, %d", math.floor(currentColor.R * 255), math.floor(currentColor.G * 255), math.floor(currentColor.B * 255))
-                rgbBox.ZIndex = 9601
-                rgbBox.Parent = pickerPopup
+                rgbBox.ZIndex = 9603
+                rgbBox.Parent = inputRow
 
-                local bCorner = Instance.new("UICorner")
-                bCorner.CornerRadius = UDim.new(0, 3)
-                bCorner.Parent = rgbBox
+                local rgbCorner = Instance.new("UICorner")
+                rgbCorner.CornerRadius = UDim.new(0, 4)
+                rgbCorner.Parent = rgbBox
 
+                local rgbStroke = Instance.new("UIStroke")
+                rgbStroke.Color = Color3.fromRGB(30, 30, 38)
+                rgbStroke.Thickness = 1
+                rgbStroke.Parent = rgbBox
+
+                local hexBox = Instance.new("TextBox")
+                hexBox.Size = UDim2.new(0.35, 0, 1, 0)
+                hexBox.Position = UDim2.new(0.65, 0, 0, 0)
+                hexBox.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+                hexBox.BorderSizePixel = 0
+                hexBox.Font = Library.Theme.FontBody
+                hexBox.TextSize = 10
+                hexBox.TextColor3 = Library.Theme.Accent
+                hexBox.PlaceholderColor3 = Library.Theme.MutedText
+                hexBox.PlaceholderText = "#HEX"
+                hexBox.Text = "#" .. currentColor:ToHex():upper()
+                hexBox.ZIndex = 9603
+                hexBox.Parent = inputRow
+
+                local hexCorner = Instance.new("UICorner")
+                hexCorner.CornerRadius = UDim.new(0, 4)
+                hexCorner.Parent = hexBox
+
+                local hexStroke = Instance.new("UIStroke")
+                hexStroke.Color = Color3.fromRGB(30, 30, 38)
+                hexStroke.Thickness = 1
+                hexStroke.Parent = hexBox
+
+                local function applyColor(col, updateHSV)
+                    currentColor = col
+                    if updateHSV then
+                        currentH, currentS, currentV = col:ToHSV()
+                    end
+
+                    colorPreview.BackgroundColor3 = currentColor
+                    curSwatch.BackgroundColor3 = currentColor
+                    svField.BackgroundColor3 = Color3.fromHSV(currentH, 1, 1)
+
+                    svCursor.Position = UDim2.new(currentS, 0, 1 - currentV, 0)
+                    hueCursor.Position = UDim2.new(0, -2, currentH, -2)
+
+                    rgbBox.Text = string.format("%d, %d, %d", math.floor(currentColor.R * 255), math.floor(currentColor.G * 255), math.floor(currentColor.B * 255))
+                    hexBox.Text = "#" .. currentColor:ToHex():upper()
+
+                    if callback then pcall(callback, currentColor) end
+                end
+
+                for _, pCol in ipairs(presets) do
+                    local swBtn = Instance.new("TextButton")
+                    swBtn.Size = UDim2.new(0, 20, 0, 18)
+                    swBtn.BackgroundColor3 = pCol
+                    swBtn.BorderSizePixel = 0
+                    swBtn.AutoButtonColor = false
+                    swBtn.Text = ""
+                    swBtn.ZIndex = 9603
+                    swBtn.Parent = swatchRow
+
+                    local sCorner = Instance.new("UICorner")
+                    sCorner.CornerRadius = UDim.new(0, 3)
+                    sCorner.Parent = swBtn
+
+                    local sStroke = Instance.new("UIStroke")
+                    sStroke.Color = Color3.fromRGB(36, 36, 44)
+                    sStroke.Thickness = 1
+                    sStroke.Parent = swBtn
+
+                    swBtn.MouseButton1Click:Connect(function()
+                        applyColor(pCol, true)
+                    end)
+                end
+
+                -- Interactive SV Field Dragging
+                local draggingSV = false
+                local function updateSV(input)
+                    local absPos = svField.AbsolutePosition
+                    local absSize = svField.AbsoluteSize
+                    local relX = math.clamp((input.Position.X - absPos.X) / absSize.X, 0, 1)
+                    local relY = math.clamp((input.Position.Y - absPos.Y) / absSize.Y, 0, 1)
+
+                    currentS = relX
+                    currentV = 1 - relY
+                    local newCol = Color3.fromHSV(currentH, currentS, currentV)
+                    applyColor(newCol, false)
+                end
+
+                svField.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                        draggingSV = true
+                        updateSV(input)
+                    end
+                end)
+
+                -- Interactive Hue Bar Dragging
+                local draggingHue = false
+                local function updateHue(input)
+                    local absPos = hueBar.AbsolutePosition
+                    local absSize = hueBar.AbsoluteSize
+                    local relY = math.clamp((input.Position.Y - absPos.Y) / absSize.Y, 0, 1)
+
+                    currentH = relY
+                    local newCol = Color3.fromHSV(currentH, currentS, currentV)
+                    applyColor(newCol, false)
+                end
+
+                hueBar.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                        draggingHue = true
+                        updateHue(input)
+                    end
+                end)
+
+                UserInputService.InputChanged:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+                        if draggingSV then
+                            updateSV(input)
+                        elseif draggingHue then
+                            updateHue(input)
+                        end
+                    end
+                end)
+
+                UserInputService.InputEnded:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                        draggingSV = false
+                        draggingHue = false
+                    end
+                end)
+
+                -- Manual RGB and Hex parsing
                 rgbBox.FocusLost:Connect(function()
                     local r, g, b = rgbBox.Text:match("(%d+)[%s,]+(%d+)[%s,]+(%d+)")
                     if r and g and b then
-                        local newC = Color3.fromRGB(tonumber(r), tonumber(g), tonumber(b))
-                        applyColor(newC)
+                        local newC = Color3.fromRGB(
+                            math.clamp(tonumber(r), 0, 255),
+                            math.clamp(tonumber(g), 0, 255),
+                            math.clamp(tonumber(b), 0, 255)
+                        )
+                        applyColor(newC, true)
                     end
+                end)
+
+                hexBox.FocusLost:Connect(function()
+                    local cleanHex = hexBox.Text:gsub("#", ""):gsub("%s+", "")
+                    pcall(function()
+                        if #cleanHex == 6 then
+                            local newC = Color3.fromHex(cleanHex)
+                            applyColor(newC, true)
+                        end
+                    end)
                 end)
 
                 local function closePicker()
@@ -1748,15 +2067,22 @@ function Library.CreateWindow(config)
                     isOpen = not isOpen
                     if isOpen then
                         local absPos = colorPreview.AbsolutePosition
-                        pickerPopup.Position = UDim2.new(0, absPos.X - 175, 0, absPos.Y - 20)
+                        local popW = 224
+                        local popH = 218
+                        local posX = absPos.X - popW - 8
+                        if posX < 10 then posX = absPos.X + 50 end
+                        local posY = math.clamp(absPos.Y - 20, 10, Camera.ViewportSize.Y - popH - 10)
+
+                        pickerPopup.Position = UDim2.new(0, posX, 0, posY)
                         pickerPopup.Visible = true
+                        applyColor(currentColor, true)
                     else
                         closePicker()
                     end
                 end)
 
                 UserInputService.InputBegan:Connect(function(input)
-                    if isOpen and input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    if isOpen and not draggingSV and not draggingHue and input.UserInputType == Enum.UserInputType.MouseButton1 then
                         local mPos = UserInputService:GetMouseLocation()
                         local pPos = pickerPopup.AbsolutePosition
                         local pSize = pickerPopup.AbsoluteSize
@@ -1774,8 +2100,7 @@ function Library.CreateWindow(config)
 
                 return {
                     SetColor = function(newColor)
-                        applyColor(newColor)
-                        rgbBox.Text = string.format("%d, %d, %d", math.floor(newColor.R * 255), math.floor(newColor.G * 255), math.floor(newColor.B * 255))
+                        applyColor(newColor, true)
                     end,
                     GetColor = function() return currentColor end,
                 }
