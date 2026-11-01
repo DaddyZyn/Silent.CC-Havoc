@@ -494,7 +494,6 @@ end
 
 local function makeDraggable(dragHandle, container)
     local dragging = false
-    local dragInput = nil
     local dragStart = Vector2.zero
     local startPos = UDim2.new()
 
@@ -503,25 +502,19 @@ local function makeDraggable(dragHandle, container)
             dragging = true
             dragStart = input.Position
             startPos = container.Position
-
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
-        end
-    end)
-
-    dragHandle.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
         end
     end)
 
     UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             local delta = input.Position - dragStart
             container.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
         end
     end)
 end
@@ -749,8 +742,6 @@ function Library.CreateWindow(config)
     contentArea.Position = UDim2.new(0, 168, 0, 8)
     contentArea.BackgroundTransparency = 1
     contentArea.Parent = mainFrame
-
-    makeDraggable(contentArea, mainFrame)
 
     -- Top-level Popup Overlay Frame (Bypasses scrolling frame clipping)
     local popupOverlay = Instance.new("Frame")
@@ -1315,76 +1306,150 @@ function Library.CreateWindow(config)
                 local sliderContainer = Instance.new("Frame")
                 sliderContainer.Name = string.format("%03d_Slider_%s", order, label)
                 sliderContainer.LayoutOrder = order
-                sliderContainer.Size = UDim2.new(1, 0, 0, 34)
+                sliderContainer.Size = UDim2.new(1, 0, 0, 38)
                 sliderContainer.BackgroundTransparency = 1
                 sliderContainer.Parent = itemsContainer
 
+                -- Header row: Label on left, editable value box on right
+                local headerRow = Instance.new("Frame")
+                headerRow.Size = UDim2.new(1, 0, 0, 16)
+                headerRow.BackgroundTransparency = 1
+                headerRow.Parent = sliderContainer
+
                 local labelText = Instance.new("TextLabel")
                 labelText.Name = "Label"
-                labelText.Size = UDim2.new(1, 0, 0, 14)
+                labelText.Size = UDim2.new(1, -70, 1, 0)
                 labelText.BackgroundTransparency = 1
-                labelText.Font = Enum.Font.RobotoMono
+                labelText.Font = Library.Theme.FontBody
                 labelText.TextSize = 11
                 labelText.TextColor3 = Library.Theme.LabelText
                 labelText.TextXAlignment = Enum.TextXAlignment.Left
                 labelText.Text = label
-                labelText.Parent = sliderContainer
+                labelText.Parent = headerRow
 
-                local track = Instance.new("Frame")
+                local valueBox = Instance.new("TextBox")
+                valueBox.Name = "ValueBox"
+                valueBox.Size = UDim2.new(0, 68, 1, 0)
+                valueBox.Position = UDim2.new(1, -68, 0, 0)
+                valueBox.BackgroundTransparency = 1
+                valueBox.Font = Library.Theme.FontBody
+                valueBox.TextSize = 10
+                valueBox.TextColor3 = Library.Theme.Accent
+                valueBox.TextXAlignment = Enum.TextXAlignment.Right
+                valueBox.Text = string.format("%d%s / %d%s", currentVal, u, max, u)
+                valueBox.ClearTextOnFocus = false
+                valueBox.Parent = headerRow
+
+                -- Track with rounded bevel
+                local track = Instance.new("TextButton")
                 track.Name = "Track"
-                track.Size = UDim2.new(1, 0, 0, 15)
-                track.Position = UDim2.new(0, 0, 0, 17)
-                track.BackgroundColor3 = Library.Theme.SliderTrack
+                track.Size = UDim2.new(1, 0, 0, 10)
+                track.Position = UDim2.new(0, 0, 0, 20)
+                track.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
                 track.BorderSizePixel = 0
+                track.AutoButtonColor = false
+                track.Text = ""
+                track.ClipsDescendants = false
                 track.Parent = sliderContainer
 
+                local tCorner = Instance.new("UICorner")
+                tCorner.CornerRadius = UDim.new(1, 0)
+                tCorner.Parent = track
+
                 local trackStroke = Instance.new("UIStroke")
-                trackStroke.Color = Library.Theme.InputBorder
+                trackStroke.Color = Color3.fromRGB(30, 30, 36)
                 trackStroke.Thickness = 1
                 trackStroke.Parent = track
 
+                -- Active Fill Bar with monochrome gradient
                 local fill = Instance.new("Frame")
                 fill.Name = "Fill"
                 local alpha = (currentVal - min) / (max - min)
                 fill.Size = UDim2.new(alpha, 0, 1, 0)
-                fill.BackgroundColor3 = Library.Theme.SliderFill
+                fill.BackgroundColor3 = Color3.fromRGB(235, 235, 240)
                 fill.BorderSizePixel = 0
+                fill.ClipsDescendants = false
                 fill.Parent = track
 
-                local valueText = Instance.new("TextLabel")
-                valueText.Name = "Value"
-                valueText.Size = UDim2.new(1, 0, 1, 0)
-                valueText.BackgroundTransparency = 1
-                valueText.Font = Enum.Font.RobotoMono
-                valueText.TextSize = 10
-                valueText.TextColor3 = Library.Theme.SliderText
-                valueText.ZIndex = 5
-                valueText.Text = string.format("%d%s/%d%s", currentVal, u, max, u)
-                valueText.Parent = track
+                local fCorner = Instance.new("UICorner")
+                fCorner.CornerRadius = UDim.new(1, 0)
+                fCorner.Parent = fill
+
+                local fGrad = Instance.new("UIGradient")
+                fGrad.Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0, Color3.fromRGB(200, 200, 210)),
+                    ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))
+                })
+                fGrad.Parent = fill
+
+                -- Circular Glowing Thumb Knob
+                local thumb = Instance.new("Frame")
+                thumb.Name = "Thumb"
+                thumb.Size = UDim2.new(0, 14, 0, 14)
+                thumb.AnchorPoint = Vector2.new(0.5, 0.5)
+                thumb.Position = UDim2.new(1, 0, 0.5, 0)
+                thumb.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                thumb.BorderSizePixel = 0
+                thumb.ZIndex = 6
+                thumb.Parent = fill
+
+                local thCorner = Instance.new("UICorner")
+                thCorner.CornerRadius = UDim.new(1, 0)
+                thCorner.Parent = thumb
+
+                local thStroke = Instance.new("UIStroke")
+                thStroke.Color = Color3.fromRGB(20, 20, 25)
+                thStroke.Thickness = 2
+                thStroke.Parent = thumb
 
                 local sliding = false
                 local function updateSlide(input)
                     local trackX = track.AbsolutePosition.X
                     local trackW = track.AbsoluteSize.X
+                    if trackW <= 0 then return end
+
                     local mouseX = input.Position.X
                     local pct = math.clamp((mouseX - trackX) / trackW, 0, 1)
                     local val = math.floor(min + ((max - min) * pct))
                     currentVal = val
+
                     fill.Size = UDim2.new(pct, 0, 1, 0)
-                    valueText.Text = string.format("%d%s/%d%s", val, u, max, u)
+                    valueBox.Text = string.format("%d%s / %d%s", val, u, max, u)
                     if callback then pcall(callback, val) end
                 end
 
                 track.InputBegan:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                         sliding = true
+                        TweenService:Create(thumb, TweenInfo.new(0.12, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                            Size = UDim2.new(0, 18, 0, 18)
+                        }):Play()
+                        TweenService:Create(trackStroke, TweenInfo.new(0.12), { Color = Library.Theme.Accent }):Play()
                         updateSlide(input)
+                    end
+                end)
+
+                track.MouseEnter:Connect(function()
+                    if not sliding then
+                        TweenService:Create(trackStroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(60, 60, 72) }):Play()
+                    end
+                end)
+
+                track.MouseLeave:Connect(function()
+                    if not sliding then
+                        TweenService:Create(trackStroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(30, 30, 36) }):Play()
                     end
                 end)
 
                 UserInputService.InputEnded:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                        sliding = false
+                        if sliding then
+                            sliding = false
+                            TweenService:Create(thumb, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                                Size = UDim2.new(0, 14, 0, 14)
+                            }):Play()
+                            TweenService:Create(trackStroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(30, 30, 36) }):Play()
+                        end
                     end
                 end)
 
@@ -1394,12 +1459,27 @@ function Library.CreateWindow(config)
                     end
                 end)
 
+                -- Allow direct numeric editing
+                valueBox.FocusLost:Connect(function()
+                    local num = tonumber(valueBox.Text:match("%d+"))
+                    if num then
+                        local clamped = math.clamp(num, min, max)
+                        currentVal = clamped
+                        local pct = (currentVal - min) / (max - min)
+                        fill.Size = UDim2.new(pct, 0, 1, 0)
+                        valueBox.Text = string.format("%d%s / %d%s", currentVal, u, max, u)
+                        if callback then pcall(callback, currentVal) end
+                    else
+                        valueBox.Text = string.format("%d%s / %d%s", currentVal, u, max, u)
+                    end
+                end)
+
                 return {
                     SetValue = function(val)
                         currentVal = math.clamp(val, min, max)
                         local pct = (currentVal - min) / (max - min)
                         fill.Size = UDim2.new(pct, 0, 1, 0)
-                        valueText.Text = string.format("%d%s/%d%s", currentVal, u, max, u)
+                        valueBox.Text = string.format("%d%s / %d%s", currentVal, u, max, u)
                         if callback then pcall(callback, currentVal) end
                     end,
                     GetValue = function() return currentVal end,
