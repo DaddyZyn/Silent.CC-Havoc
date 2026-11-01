@@ -1340,12 +1340,12 @@ function Library.CreateWindow(config)
                 valueBox.ClearTextOnFocus = false
                 valueBox.Parent = headerRow
 
-                -- Track with rounded bevel
+                -- Streamlined Thin Track (5px height, clean minimalist profile)
                 local track = Instance.new("TextButton")
                 track.Name = "Track"
-                track.Size = UDim2.new(1, 0, 0, 10)
-                track.Position = UDim2.new(0, 0, 0, 20)
-                track.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+                track.Size = UDim2.new(1, 0, 0, 6)
+                track.Position = UDim2.new(0, 0, 0, 22)
+                track.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
                 track.BorderSizePixel = 0
                 track.AutoButtonColor = false
                 track.Text = ""
@@ -1357,11 +1357,11 @@ function Library.CreateWindow(config)
                 tCorner.Parent = track
 
                 local trackStroke = Instance.new("UIStroke")
-                trackStroke.Color = Color3.fromRGB(30, 30, 36)
+                trackStroke.Color = Color3.fromRGB(32, 32, 38)
                 trackStroke.Thickness = 1
                 trackStroke.Parent = track
 
-                -- Active Fill Bar with monochrome gradient
+                -- Active Fill Bar (Clean gradient bar without circle knob)
                 local fill = Instance.new("Frame")
                 fill.Name = "Fill"
                 local alpha = (currentVal - min) / (max - min)
@@ -1377,30 +1377,24 @@ function Library.CreateWindow(config)
 
                 local fGrad = Instance.new("UIGradient")
                 fGrad.Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0, Color3.fromRGB(200, 200, 210)),
+                    ColorSequenceKeypoint.new(0, Color3.fromRGB(180, 180, 195)),
                     ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))
                 })
                 fGrad.Parent = fill
 
-                -- Circular Glowing Thumb Knob
-                local thumb = Instance.new("Frame")
-                thumb.Name = "Thumb"
-                thumb.Size = UDim2.new(0, 14, 0, 14)
-                thumb.AnchorPoint = Vector2.new(0.5, 0.5)
-                thumb.Position = UDim2.new(1, 0, 0.5, 0)
-                thumb.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-                thumb.BorderSizePixel = 0
-                thumb.ZIndex = 6
-                thumb.Parent = fill
+                -- Right-edge vertical accent bar for subtle high-contrast terminus
+                local fillCap = Instance.new("Frame")
+                fillCap.Name = "Cap"
+                fillCap.Size = UDim2.new(0, 2, 1, 2)
+                fillCap.AnchorPoint = Vector2.new(1, 0.5)
+                fillCap.Position = UDim2.new(1, 0, 0.5, 0)
+                fillCap.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                fillCap.BorderSizePixel = 0
+                fillCap.Parent = fill
 
-                local thCorner = Instance.new("UICorner")
-                thCorner.CornerRadius = UDim.new(1, 0)
-                thCorner.Parent = thumb
-
-                local thStroke = Instance.new("UIStroke")
-                thStroke.Color = Color3.fromRGB(20, 20, 25)
-                thStroke.Thickness = 2
-                thStroke.Parent = thumb
+                local cCorner = Instance.new("UICorner")
+                cCorner.CornerRadius = UDim.new(1, 0)
+                cCorner.Parent = fillCap
 
                 local sliding = false
                 local function updateSlide(input)
@@ -1421,23 +1415,24 @@ function Library.CreateWindow(config)
                 track.InputBegan:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                         sliding = true
-                        TweenService:Create(thumb, TweenInfo.new(0.12, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-                            Size = UDim2.new(0, 18, 0, 18)
-                        }):Play()
+                        TweenService:Create(track, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(24, 24, 30) }):Play()
                         TweenService:Create(trackStroke, TweenInfo.new(0.12), { Color = Library.Theme.Accent }):Play()
+                        TweenService:Create(valueBox, TweenInfo.new(0.12), { TextColor3 = Color3.fromRGB(255, 255, 255) }):Play()
                         updateSlide(input)
                     end
                 end)
 
                 track.MouseEnter:Connect(function()
                     if not sliding then
-                        TweenService:Create(trackStroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(60, 60, 72) }):Play()
+                        TweenService:Create(trackStroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(65, 65, 78) }):Play()
+                        TweenService:Create(track, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(22, 22, 28) }):Play()
                     end
                 end)
 
                 track.MouseLeave:Connect(function()
                     if not sliding then
-                        TweenService:Create(trackStroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(30, 30, 36) }):Play()
+                        TweenService:Create(trackStroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(32, 32, 38) }):Play()
+                        TweenService:Create(track, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(18, 18, 22) }):Play()
                     end
                 end)
 
@@ -1445,10 +1440,9 @@ function Library.CreateWindow(config)
                     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                         if sliding then
                             sliding = false
-                            TweenService:Create(thumb, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-                                Size = UDim2.new(0, 14, 0, 14)
-                            }):Play()
-                            TweenService:Create(trackStroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(30, 30, 36) }):Play()
+                            TweenService:Create(trackStroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(32, 32, 38) }):Play()
+                            TweenService:Create(track, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(18, 18, 22) }):Play()
+                            TweenService:Create(valueBox, TweenInfo.new(0.15), { TextColor3 = Library.Theme.Accent }):Play()
                         end
                     end
                 end)
@@ -1723,7 +1717,7 @@ function Library.CreateWindow(config)
 
                 local colorLabel = Instance.new("TextLabel")
                 colorLabel.Name = "Label"
-                colorLabel.Size = UDim2.new(1, -54, 1, 0)
+                colorLabel.Size = UDim2.new(1, -30, 1, 0)
                 colorLabel.BackgroundTransparency = 1
                 colorLabel.Font = Library.Theme.FontBody
                 colorLabel.TextSize = 11
@@ -1734,8 +1728,8 @@ function Library.CreateWindow(config)
 
                 local colorPreview = Instance.new("TextButton")
                 colorPreview.Name = "Preview"
-                colorPreview.Size = UDim2.new(0, 42, 0, 18)
-                colorPreview.Position = UDim2.new(1, -42, 0.5, -9)
+                colorPreview.Size = UDim2.new(0, 18, 0, 18)
+                colorPreview.Position = UDim2.new(1, -18, 0.5, -9)
                 colorPreview.BackgroundColor3 = currentColor
                 colorPreview.BorderSizePixel = 0
                 colorPreview.AutoButtonColor = false
