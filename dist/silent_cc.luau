@@ -145,12 +145,6 @@ local Config = {
         HiddenColor = Color3.fromRGB(120, 120, 120),
         Transparency = 0,
     },
-    ItemSpawner = {
-        SelectedCategory = "Weapons",
-        SelectedItem = "M18",
-        SpawnMethod = "InventoryEvent",
-        Amount = 1,
-    },
     Character = {
         SpeedOverride = false,
         SpeedValue = 20,
@@ -438,121 +432,6 @@ end
 -- =========================================================================
 
 -- =========================================================================
--- SECTION 5B: HAVOC ITEM SPONSOR & REPLICATION EXECUTOR
--- =========================================================================
-local ItemDatabase = {
-    Weapons = { "M18", "DesertEagle", "AK47", "M4A1", "MP5", "Remington870", "AWM", "Glock17" },
-    Containers = { "WeaponCrate", "LootBox", "SafeSmall", "SafeLarge", "AirdropCrate" },
-    Medical = { "WhiteMedkit", "Bandage", "Morphine", "Splint" },
-    Gears = { "AltynHelmet", "Tier4Armor", "TacticalBackpack", "NightVisionGoggles" },
-}
-
-pcall(function()
-    local libWeapons = ReplicatedStorage:FindFirstChild("Storage")
-    if libWeapons then
-        local wMod = libWeapons:FindFirstChild("Modules")
-        if wMod then
-            local wepFolder = wMod:FindFirstChild("Weapons")
-            if wepFolder then
-                local found = {}
-                for _, w in ipairs(wepFolder:GetChildren()) do
-                    if w:IsA("ModuleScript") then
-                        table.insert(found, w.Name)
-                    end
-                end
-                if #found > 0 then ItemDatabase.Weapons = found end
-            end
-        end
-    end
-end)
-
-local function attemptSpawnItem(itemName, method)
-    method = method or Config.ItemSpawner.SpawnMethod
-    local success = false
-    local detail = ""
-
-    -- Pipeline 1: InventoryEvent direct injection
-    if method == "InventoryEvent" or method == "All Pipelines" then
-        pcall(function()
-            local invEvent = ReplicatedStorage:FindFirstChild("Storage")
-            if invEvent then
-                local events = invEvent:FindFirstChild("Events")
-                if events then
-                    local ev = events:FindFirstChild("InventoryEvent")
-                    if ev and ev:IsA("RemoteEvent") then
-                        ev:FireServer("Equip", itemName, 1)
-                        ev:FireServer("Pickup", itemName, 1)
-                        ev:FireServer("Add", itemName, 1)
-                        success = true
-                        detail = "Fired ReplicatedStorage.Storage.Events.InventoryEvent (Equip/Add)"
-                    end
-                end
-            end
-        end)
-    end
-
-    -- Pipeline 2: TraderStashRequest replication (Vault & Trader stash)
-    if method == "TraderStashRequest" or method == "All Pipelines" then
-        pcall(function()
-            local stashReq = ReplicatedStorage:FindFirstChild("TraderStashRequest")
-            if stashReq and stashReq:IsA("RemoteFunction") then
-                task.spawn(function()
-                    pcall(function() stashReq:InvokeServer("Withdraw", itemName, 1) end)
-                    pcall(function() stashReq:InvokeServer("Buy", itemName, 1) end)
-                    pcall(function() stashReq:InvokeServer("Take", itemName, 1) end)
-                    pcall(function() stashReq:InvokeServer("Transfer", itemName, 1) end)
-                end)
-                success = true
-                detail = detail .. " | Invoked TraderStashRequest (Withdraw/Buy/Take)"
-            end
-        end)
-    end
-
-    -- Pipeline 2B: InventoryFunction replication (Hideout Vault commit)
-    if method == "TraderStashRequest" or method == "InventoryEvent" or method == "All Pipelines" then
-        pcall(function()
-            local invFn = ReplicatedStorage:FindFirstChild("Storage")
-            if invFn then
-                local events = invFn:FindFirstChild("Events")
-                if events then
-                    local fn = events:FindFirstChild("InventoryFunction")
-                    if fn and fn:IsA("RemoteFunction") then
-                        task.spawn(function()
-                            pcall(function() fn:InvokeServer("Add", itemName, 1) end)
-                            pcall(function() fn:InvokeServer("Equip", itemName, 1) end)
-                            pcall(function() fn:InvokeServer("MoveToStash", itemName, 1) end)
-                        end)
-                        success = true
-                        detail = detail .. " | Invoked InventoryFunction"
-                    end
-                end
-            end
-        end)
-    end
-
-    -- Pipeline 3: Client In-Memory Tool Injection (Equips locally to character rig)
-    if method == "Client Memory Injection" or method == "All Pipelines" then
-        pcall(function()
-            if LocalPlayer and LocalPlayer.Character then
-                local tool = Instance.new("Tool")
-                tool.Name = itemName
-                tool.RequiresHandle = false
-                local handle = Instance.new("Part")
-                handle.Name = "Handle"
-                handle.Size = Vector3.new(1, 1, 3)
-                handle.Transparency = 1
-                handle.CanCollide = false
-                handle.Parent = tool
-                tool.Parent = LocalPlayer.Character
-                success = true
-                detail = detail .. " | Created local Tool rig"
-            end
-        end)
-    end
-
-    return success, detail
-end
-
 -- SECTION 6: UI FRAMEWORK (VERTICAL SIDEBAR MONOCHROME)
 -- =========================================================================
 local Library = {}
@@ -1295,17 +1174,18 @@ function Library.CreateWindow(config)
             end
 
             function Group:AddDropdown(label, items, default, callback)
-                local selected = default or items[1] or "None"
+                local currentItems = items or {}
+                local selected = default or currentItems[1] or "None"
                 local isOpen = false
                 local order = nextOrder()
 
                 local dropContainer = Instance.new("Frame")
                 dropContainer.Name = string.format("%03d_Dropdown_%s", order, label)
                 dropContainer.LayoutOrder = order
-                dropContainer.Size = UDim2.new(1, 0, 0, 40)
+                dropContainer.Size = UDim2.new(1, 0, 0, 42)
                 dropContainer.BackgroundTransparency = 1
                 dropContainer.ClipsDescendants = false
-                dropContainer.ZIndex = 10
+                dropContainer.ZIndex = 20
                 dropContainer.Parent = itemsContainer
 
                 local dropTitle = Instance.new("TextLabel")
@@ -1321,7 +1201,7 @@ function Library.CreateWindow(config)
 
                 local dropBtn = Instance.new("TextButton")
                 dropBtn.Name = "SelectBox"
-                dropBtn.Size = UDim2.new(1, 0, 0, 22)
+                dropBtn.Size = UDim2.new(1, 0, 0, 24)
                 dropBtn.Position = UDim2.new(0, 0, 0, 16)
                 dropBtn.BackgroundColor3 = Library.Theme.InputBg
                 dropBtn.BorderSizePixel = 0
@@ -1329,8 +1209,9 @@ function Library.CreateWindow(config)
                 dropBtn.TextSize = 11
                 dropBtn.TextColor3 = Library.Theme.LabelText
                 dropBtn.TextXAlignment = Enum.TextXAlignment.Left
-                dropBtn.Text = "  " .. selected
+                dropBtn.Text = "  " .. tostring(selected)
                 dropBtn.AutoButtonColor = false
+                dropBtn.ZIndex = 21
                 dropBtn.Parent = dropContainer
 
                 local dropStroke = Instance.new("UIStroke")
@@ -1347,53 +1228,70 @@ function Library.CreateWindow(config)
                 arrow.TextSize = 10
                 arrow.TextColor3 = Library.Theme.MutedText
                 arrow.Text = "v"
+                arrow.ZIndex = 22
                 arrow.Parent = dropBtn
 
-                local optionsFrame = Instance.new("Frame")
+                local optionsFrame = Instance.new("ScrollingFrame")
                 optionsFrame.Name = "Options"
-                optionsFrame.Size = UDim2.new(1, 0, 0, #items * 22)
-                optionsFrame.Position = UDim2.new(0, 0, 1, 2)
-                optionsFrame.BackgroundColor3 = Library.Theme.GroupboxBg
+                optionsFrame.Position = UDim2.new(0, 0, 1, 3)
+                optionsFrame.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
                 optionsFrame.BorderSizePixel = 0
-                optionsFrame.ZIndex = 100
+                optionsFrame.ScrollBarThickness = 3
+                optionsFrame.ScrollBarImageColor3 = Library.Theme.Accent
+                optionsFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+                optionsFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+                optionsFrame.ZIndex = 500
                 optionsFrame.Visible = false
                 optionsFrame.Parent = dropBtn
 
                 local optStroke = Instance.new("UIStroke")
-                optStroke.Color = Library.Theme.Accent
+                optStroke.Color = Library.Theme.WindowStroke
                 optStroke.Thickness = 1
                 optStroke.Parent = optionsFrame
 
                 local optLayout = Instance.new("UIListLayout")
                 optLayout.FillDirection = Enum.FillDirection.Vertical
                 optLayout.SortOrder = Enum.SortOrder.LayoutOrder
+                optLayout.Padding = UDim.new(0, 1)
                 optLayout.Parent = optionsFrame
 
-                for idx, item in ipairs(items) do
-                    local opt = Instance.new("TextButton")
-                    opt.Name = "Item_" .. item
-                    opt.LayoutOrder = idx
-                    opt.Size = UDim2.new(1, 0, 0, 22)
-                    opt.BackgroundColor3 = Library.Theme.GroupboxBg
-                    opt.BorderSizePixel = 0
-                    opt.Font = Enum.Font.RobotoMono
-                    opt.TextSize = 11
-                    opt.TextColor3 = (item == selected) and Library.Theme.Accent or Library.Theme.LabelText
-                    opt.TextXAlignment = Enum.TextXAlignment.Left
-                    opt.Text = "  " .. item
-                    opt.ZIndex = 101
-                    opt.AutoButtonColor = false
-                    opt.Parent = optionsFrame
+                local function populateOptions(list, currentSel)
+                    for _, child in ipairs(optionsFrame:GetChildren()) do
+                        if child:IsA("TextButton") then child:Destroy() end
+                    end
+                    local count = #list
+                    local frameH = math.clamp(count * 24, 24, 150)
+                    optionsFrame.Size = UDim2.new(1, 0, 0, frameH)
 
-                    opt.MouseButton1Click:Connect(function()
-                        selected = item
-                        dropBtn.Text = "  " .. selected
-                        optionsFrame.Visible = false
-                        isOpen = false
-                        arrow.Text = "v"
-                        if callback then pcall(callback, selected) end
-                    end)
+                    for idx, item in ipairs(list) do
+                        local opt = Instance.new("TextButton")
+                        opt.Name = "Item_" .. tostring(item)
+                        opt.LayoutOrder = idx
+                        opt.Size = UDim2.new(1, 0, 0, 22)
+                        opt.BackgroundColor3 = (item == currentSel) and Color3.fromRGB(25, 25, 30) or Color3.fromRGB(16, 16, 20)
+                        opt.BorderSizePixel = 0
+                        opt.Font = Enum.Font.RobotoMono
+                        opt.TextSize = 11
+                        opt.TextColor3 = (item == currentSel) and Library.Theme.Accent or Library.Theme.LabelText
+                        opt.TextXAlignment = Enum.TextXAlignment.Left
+                        opt.Text = "  " .. tostring(item)
+                        opt.ZIndex = 505
+                        opt.AutoButtonColor = false
+                        opt.Parent = optionsFrame
+
+                        opt.MouseButton1Click:Connect(function()
+                            selected = item
+                            dropBtn.Text = "  " .. tostring(selected)
+                            optionsFrame.Visible = false
+                            isOpen = false
+                            arrow.Text = "v"
+                            populateOptions(list, selected)
+                            if callback then pcall(callback, selected) end
+                        end)
+                    end
                 end
+
+                populateOptions(currentItems, selected)
 
                 dropBtn.MouseButton1Click:Connect(function()
                     isOpen = not isOpen
@@ -1402,6 +1300,18 @@ function Library.CreateWindow(config)
                 end)
 
                 return {
+                    SetValue = function(newVal)
+                        selected = newVal
+                        dropBtn.Text = "  " .. tostring(selected)
+                        populateOptions(currentItems, selected)
+                        if callback then pcall(callback, selected) end
+                    end,
+                    SetOptions = function(newList, newDefault)
+                        currentItems = newList or {}
+                        selected = newDefault or currentItems[1] or "None"
+                        dropBtn.Text = "  " .. tostring(selected)
+                        populateOptions(currentItems, selected)
+                    end,
                     GetValue = function() return selected end,
                 }
             end
@@ -1894,77 +1804,7 @@ WeaponGroup:AddToggle("Fast Tactical Reload", Config.Character.FastReload, { Cal
 WeaponGroup:AddToggle("Recoil Neutralizer", Config.Character.NoRecoil, { Callback = function(v) Config.Character.NoRecoil = v end })
 WeaponGroup:AddToggle("Spread Reduction", Config.Character.NoSpread, { Callback = function(v) Config.Character.NoSpread = v end })
 
--- TAB 5: ITEM SPAWNER
-local SpawnerTab = Window:CreateTab("Spawner")
-
-local SpawnControlGroup = SpawnerTab:CreateGroupbox("Item Dispatcher", "Left")
-local spawnStatusLabel = nil
-
-local itemDropdownHolder = nil
-SpawnControlGroup:AddDropdown("Item Category", { "Weapons", "Containers", "Medical", "Gears" }, Config.ItemSpawner.SelectedCategory, function(cat)
-    Config.ItemSpawner.SelectedCategory = cat
-    local items = ItemDatabase[cat] or ItemDatabase.Weapons
-    Config.ItemSpawner.SelectedItem = items[1] or ""
-    if itemDropdownHolder and itemDropdownHolder.SetOptions then
-        itemDropdownHolder.SetOptions(items, Config.ItemSpawner.SelectedItem)
-    end
-end)
-
-itemDropdownHolder = SpawnControlGroup:AddDropdown("Select Item", ItemDatabase.Weapons, Config.ItemSpawner.SelectedItem, function(it)
-    Config.ItemSpawner.SelectedItem = it
-end)
-
-SpawnControlGroup:AddDropdown("Injection Pipeline", { "All Pipelines", "InventoryEvent", "TraderStashRequest", "Client Memory Injection" }, Config.ItemSpawner.SpawnMethod, function(m)
-    Config.ItemSpawner.SpawnMethod = m
-end)
-
-SpawnControlGroup:AddButton("SPAWN / EQUIP SELECTED ITEM", function()
-    local item = Config.ItemSpawner.SelectedItem
-    local method = Config.ItemSpawner.SpawnMethod
-    local success, detail = attemptSpawnItem(item, method)
-    if spawnStatusLabel then
-        if success then
-            spawnStatusLabel.Text = "[+] Dispatched: " .. tostring(item) .. "\n" .. tostring(detail)
-            spawnStatusLabel.TextColor3 = Color3.fromRGB(180, 255, 180)
-        else
-            spawnStatusLabel.Text = "[-] Failed to dispatch item: " .. tostring(item)
-            spawnStatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-        end
-    end
-end)
-
-spawnStatusLabel = SpawnControlGroup:AddLabel("[i] Ready to dispatch items via Havoc remotes.")
-
-local QuickSpawnGroup = SpawnerTab:CreateGroupbox("Quick Preset Guns", "Right")
-QuickSpawnGroup:AddButton("Spawn M18 Rifle", function()
-    attemptSpawnItem("M18", "All Pipelines")
-end)
-QuickSpawnGroup:AddButton("Spawn Desert Eagle", function()
-    attemptSpawnItem("DesertEagle", "All Pipelines")
-end)
-QuickSpawnGroup:AddButton("Spawn AK47", function()
-    attemptSpawnItem("AK47", "All Pipelines")
-end)
-QuickSpawnGroup:AddButton("Spawn M4A1", function()
-    attemptSpawnItem("M4A1", "All Pipelines")
-end)
-QuickSpawnGroup:AddButton("Spawn Altyn Helmet", function()
-    attemptSpawnItem("AltynHelmet", "All Pipelines")
-end)
-QuickSpawnGroup:AddButton("Spawn White Medkit", function()
-    attemptSpawnItem("WhiteMedkit", "All Pipelines")
-end)
-
--- TAB 6: CREDITS
-local CreditsTab = Window:CreateTab("Credits")
-local CreditsGroup = CreditsTab:CreateGroupbox("Credits & Info", "Left")
-CreditsGroup:AddLabel("havoc.dead // silent.cc suite")
-CreditsGroup:AddLabel("Game: Havoc (Extraction Shooter)")
-CreditsGroup:AddLabel("Interface: Pitch Monochrome Obsidian")
-CreditsGroup:AddLabel("Author: cook45 & clack")
-CreditsGroup:AddLabel("Status: Active")
-
--- TAB 7: SETTINGS
+-- TAB 5: SETTINGS
 local SettingsTab = Window:CreateTab("Settings")
 
 local ProfileGroup = SettingsTab:CreateGroupbox("Profile Manager", "Left")
