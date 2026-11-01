@@ -436,40 +436,47 @@ end
 -- =========================================================================
 local Library = {}
 Library.Theme = {
-    WindowBg = Color3.fromRGB(13, 13, 15),
+    WindowBg = Color3.fromRGB(10, 10, 12),
     WindowBorder = Color3.fromRGB(0, 0, 0),
-    WindowStroke = Color3.fromRGB(28, 28, 32),
+    WindowStroke = Color3.fromRGB(32, 32, 38),
+    WindowGlow = Color3.fromRGB(255, 255, 255),
 
-    SidebarBg = Color3.fromRGB(10, 10, 12),
-    SidebarBorder = Color3.fromRGB(24, 24, 28),
+    SidebarBg = Color3.fromRGB(8, 8, 10),
+    SidebarBorder = Color3.fromRGB(22, 22, 26),
 
-    TitlebarBg = Color3.fromRGB(10, 10, 12),
-    TitlebarText = Color3.fromRGB(240, 240, 245),
+    TitlebarBg = Color3.fromRGB(8, 8, 10),
+    TitlebarText = Color3.fromRGB(245, 245, 250),
 
-    NavbarBg = Color3.fromRGB(10, 10, 12),
-    TabActiveBg = Color3.fromRGB(22, 22, 25),
-    TabActiveBorder = Color3.fromRGB(45, 45, 52),
-    TabInactiveText = Color3.fromRGB(120, 120, 130),
+    NavbarBg = Color3.fromRGB(8, 8, 10),
+    TabActiveBg = Color3.fromRGB(20, 20, 24),
+    TabActiveBorder = Color3.fromRGB(48, 48, 56),
+    TabInactiveText = Color3.fromRGB(130, 130, 142),
     TabActiveText = Color3.fromRGB(255, 255, 255),
+    TabHoverBg = Color3.fromRGB(14, 14, 18),
 
-    Accent = Color3.fromRGB(230, 230, 235), -- Crisp Monochrome
-    AccentDim = Color3.fromRGB(160, 160, 170),
-    AccentSecondary = Color3.fromRGB(180, 180, 190),
+    Accent = Color3.fromRGB(235, 235, 240),
+    AccentGlow = Color3.fromRGB(255, 255, 255),
+    AccentDim = Color3.fromRGB(165, 165, 175),
+    AccentSecondary = Color3.fromRGB(185, 185, 195),
 
-    GroupboxBg = Color3.fromRGB(15, 15, 18),
-    GroupboxBorder = Color3.fromRGB(28, 28, 33),
-    GroupboxTitle = Color3.fromRGB(225, 225, 230),
+    GroupboxBg = Color3.fromRGB(13, 13, 16),
+    GroupboxBorder = Color3.fromRGB(26, 26, 32),
+    GroupboxTitle = Color3.fromRGB(235, 235, 240),
 
-    LabelText = Color3.fromRGB(195, 195, 202),
-    MutedText = Color3.fromRGB(115, 115, 125),
-    WarnText = Color3.fromRGB(255, 90, 90),
+    LabelText = Color3.fromRGB(200, 200, 208),
+    MutedText = Color3.fromRGB(120, 120, 132),
+    WarnText = Color3.fromRGB(255, 95, 95),
 
-    InputBg = Color3.fromRGB(10, 10, 12),
-    InputBorder = Color3.fromRGB(32, 32, 38),
+    InputBg = Color3.fromRGB(8, 8, 10),
+    InputBorder = Color3.fromRGB(30, 30, 36),
 
-    SliderTrack = Color3.fromRGB(18, 18, 22),
-    SliderFill = Color3.fromRGB(220, 220, 225),
-    SliderText = Color3.fromRGB(245, 245, 250),
+    SliderTrack = Color3.fromRGB(16, 16, 20),
+    SliderFill = Color3.fromRGB(235, 235, 240),
+    SliderText = Color3.fromRGB(250, 250, 255),
+
+    FontTitle = Enum.Font.GothamMedium,
+    FontTab = Enum.Font.GothamMedium,
+    FontBody = Enum.Font.RobotoMono,
 }
 
 local function getSafeParent()
@@ -549,13 +556,41 @@ function Library.CreateWindow(config)
     windowStroke.Parent = mainFrame
 
     -- Vertical Sidebar Layout (havoc.dead style)
+    -- Outer Glow effect behind MainWindow
+    local windowGlow = Instance.new("ImageLabel")
+    windowGlow.Name = "WindowGlow"
+    windowGlow.Size = UDim2.new(1, 36, 1, 36)
+    windowGlow.Position = UDim2.new(0, -18, 0, -18)
+    windowGlow.BackgroundTransparency = 1
+    windowGlow.Image = "rbxassetid://5028857084"
+    windowGlow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+    windowGlow.ImageTransparency = 0.25
+    windowGlow.ScaleType = Enum.ScaleType.Slice
+    windowGlow.SliceCenter = Rect.new(24, 24, 276, 276)
+    windowGlow.ZIndex = mainFrame.ZIndex - 1
+    windowGlow.Parent = mainFrame
+
+    -- Vertical Sidebar Layout (havoc.dead style)
     local sidebar = Instance.new("Frame")
     sidebar.Name = "Sidebar"
-    sidebar.Size = UDim2.new(0, 150, 1, 0)
+    sidebar.Size = UDim2.new(0, 160, 1, 0)
     sidebar.Position = UDim2.new(0, 0, 0, 0)
     sidebar.BackgroundColor3 = Library.Theme.SidebarBg
     sidebar.BorderSizePixel = 0
     sidebar.Parent = mainFrame
+
+    -- Subtle gradient highlight on sidebar
+    local sbGrad = Instance.new("UIGradient")
+    sbGrad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(210, 210, 220))
+    })
+    sbGrad.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0),
+        NumberSequenceKeypoint.new(1, 0.1)
+    })
+    sbGrad.Rotation = 90
+    sbGrad.Parent = sidebar
 
     local sidebarBorder = Instance.new("Frame")
     sidebarBorder.Name = "SidebarBorder"
@@ -567,17 +602,29 @@ function Library.CreateWindow(config)
 
     local titleBar = Instance.new("Frame")
     titleBar.Name = "TitleBar"
-    titleBar.Size = UDim2.new(1, 0, 0, 48)
+    titleBar.Size = UDim2.new(1, 0, 0, 52)
     titleBar.BackgroundTransparency = 1
     titleBar.Parent = sidebar
 
+    local titleGlow = Instance.new("Frame")
+    titleGlow.Name = "TitleAccentDot"
+    titleGlow.Size = UDim2.new(0, 6, 0, 6)
+    titleGlow.Position = UDim2.new(0, 16, 0.5, -3)
+    titleGlow.BackgroundColor3 = Color3.fromRGB(240, 240, 245)
+    titleGlow.BorderSizePixel = 0
+    titleGlow.Parent = titleBar
+
+    local dotCorner = Instance.new("UICorner")
+    dotCorner.CornerRadius = UDim.new(1, 0)
+    dotCorner.Parent = titleGlow
+
     local titleLabel = Instance.new("TextLabel")
     titleLabel.Name = "TitleLabel"
-    titleLabel.Size = UDim2.new(1, -20, 1, 0)
-    titleLabel.Position = UDim2.new(0, 18, 0, 0)
+    titleLabel.Size = UDim2.new(1, -36, 1, 0)
+    titleLabel.Position = UDim2.new(0, 28, 0, 0)
     titleLabel.BackgroundTransparency = 1
-    titleLabel.Font = Enum.Font.SourceSansItalic
-    titleLabel.TextSize = 17
+    titleLabel.Font = Library.Theme.FontTitle
+    titleLabel.TextSize = 15
     titleLabel.TextColor3 = Library.Theme.TitlebarText
     titleLabel.TextXAlignment = Enum.TextXAlignment.Left
     titleLabel.Text = "havoc.dead"
@@ -587,8 +634,8 @@ function Library.CreateWindow(config)
 
     local navBar = Instance.new("Frame")
     navBar.Name = "NavList"
-    navBar.Size = UDim2.new(1, -16, 1, -110)
-    navBar.Position = UDim2.new(0, 10, 0, 52)
+    navBar.Size = UDim2.new(1, -16, 1, -120)
+    navBar.Position = UDim2.new(0, 8, 0, 56)
     navBar.BackgroundTransparency = 1
     navBar.Parent = sidebar
 
@@ -597,32 +644,33 @@ function Library.CreateWindow(config)
     navLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
     navLayout.VerticalAlignment = Enum.VerticalAlignment.Top
     navLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    navLayout.Padding = UDim.new(0, 3)
+    navLayout.Padding = UDim.new(0, 4)
     navLayout.Parent = navBar
 
-    -- User profile card at sidebar bottom
+    -- User profile card at sidebar bottom with shading & glow
     local profileCard = Instance.new("Frame")
     profileCard.Name = "ProfileCard"
-    profileCard.Size = UDim2.new(1, -16, 0, 44)
-    profileCard.Position = UDim2.new(0, 8, 1, -50)
-    profileCard.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+    profileCard.Size = UDim2.new(1, -16, 0, 46)
+    profileCard.Position = UDim2.new(0, 8, 1, -54)
+    profileCard.BackgroundColor3 = Color3.fromRGB(13, 13, 16)
     profileCard.BorderSizePixel = 0
     profileCard.Parent = sidebar
 
     local pStroke = Instance.new("UIStroke")
-    pStroke.Color = Color3.fromRGB(30, 30, 35)
+    pStroke.Color = Color3.fromRGB(30, 30, 36)
     pStroke.Thickness = 1
     pStroke.Parent = profileCard
 
     local pCorner = Instance.new("UICorner")
-    pCorner.CornerRadius = UDim.new(0, 4)
+    pCorner.CornerRadius = UDim.new(0, 6)
     pCorner.Parent = profileCard
 
     local userAvatar = Instance.new("ImageLabel")
     userAvatar.Name = "Avatar"
-    userAvatar.Size = UDim2.new(0, 30, 0, 30)
-    userAvatar.Position = UDim2.new(0, 7, 0.5, -15)
-    userAvatar.BackgroundTransparency = 1
+    userAvatar.Size = UDim2.new(0, 32, 0, 32)
+    userAvatar.Position = UDim2.new(0, 7, 0.5, -16)
+    userAvatar.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
+    userAvatar.BorderSizePixel = 0
     userAvatar.Image = "rbxasset://textures/ui/GuiImagePlaceholder.png"
     pcall(function()
         if LocalPlayer then
@@ -632,28 +680,60 @@ function Library.CreateWindow(config)
     userAvatar.Parent = profileCard
 
     local avCorner = Instance.new("UICorner")
-    avCorner.CornerRadius = UDim.new(0, 4)
+    avCorner.CornerRadius = UDim.new(0, 5)
     avCorner.Parent = userAvatar
+
+    local avStroke = Instance.new("UIStroke")
+    avStroke.Color = Color3.fromRGB(40, 40, 48)
+    avStroke.Thickness = 1
+    avStroke.Parent = userAvatar
 
     local userLabel = Instance.new("TextLabel")
     userLabel.Name = "UserLabel"
-    userLabel.Size = UDim2.new(1, -44, 1, 0)
-    userLabel.Position = UDim2.new(0, 42, 0, 0)
+    userLabel.Size = UDim2.new(1, -48, 0, 16)
+    userLabel.Position = UDim2.new(0, 46, 0, 8)
     userLabel.BackgroundTransparency = 1
-    userLabel.Font = Enum.Font.RobotoMono
-    userLabel.TextSize = 10
+    userLabel.Font = Library.Theme.FontTitle
+    userLabel.TextSize = 11
     userLabel.TextColor3 = Library.Theme.LabelText
     userLabel.TextXAlignment = Enum.TextXAlignment.Left
     userLabel.TextTruncate = Enum.TextTruncate.AtEnd
     userLabel.Text = LocalPlayer and ("@" .. LocalPlayer.Name) or "@user"
     userLabel.Parent = profileCard
 
+    local userRole = Instance.new("TextLabel")
+    userRole.Name = "UserRole"
+    userRole.Size = UDim2.new(1, -48, 0, 12)
+    userRole.Position = UDim2.new(0, 46, 0, 24)
+    userRole.BackgroundTransparency = 1
+    userRole.Font = Library.Theme.FontBody
+    userRole.TextSize = 9
+    userRole.TextColor3 = Library.Theme.MutedText
+    userRole.TextXAlignment = Enum.TextXAlignment.Left
+    userRole.Text = "subscriber"
+    userRole.Parent = profileCard
+
     local function setVisibility(visible)
         isMenuVisible = visible
-        mainFrame.Visible = visible
         if visible then
+            mainFrame.Visible = true
+            mainFrame.Size = UDim2.new(0, windowSize.X * 0.98, 0, windowSize.Y * 0.98)
+            mainFrame.BackgroundTransparency = 0.3
+            TweenService:Create(mainFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                Size = UDim2.new(0, windowSize.X, 0, windowSize.Y),
+                BackgroundTransparency = 0
+            }):Play()
             UserInputService.MouseBehavior = Enum.MouseBehavior.Default
             UserInputService.MouseIconEnabled = true
+        else
+            local tw = TweenService:Create(mainFrame, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
+                Size = UDim2.new(0, windowSize.X * 0.98, 0, windowSize.Y * 0.98),
+                BackgroundTransparency = 1
+            })
+            tw:Play()
+            tw.Completed:Connect(function()
+                if not isMenuVisible then mainFrame.Visible = false end
+            end)
         end
     end
 
@@ -665,8 +745,8 @@ function Library.CreateWindow(config)
 
     local contentArea = Instance.new("Frame")
     contentArea.Name = "ContentArea"
-    contentArea.Size = UDim2.new(1, -165, 1, -16)
-    contentArea.Position = UDim2.new(0, 158, 0, 8)
+    contentArea.Size = UDim2.new(1, -175, 1, -16)
+    contentArea.Position = UDim2.new(0, 168, 0, 8)
     contentArea.BackgroundTransparency = 1
     contentArea.Parent = mainFrame
 
@@ -684,23 +764,50 @@ function Library.CreateWindow(config)
 
         local tabBtn = Instance.new("TextButton")
         tabBtn.Name = string.format("Tab_%02d_%s", tabIndex, tabName)
-        tabBtn.Size = UDim2.new(1, 0, 0, 26)
+        tabBtn.Size = UDim2.new(1, 0, 0, 32)
         tabBtn.LayoutOrder = tabIndex
+        tabBtn.BackgroundColor3 = Library.Theme.TabHoverBg
         tabBtn.BackgroundTransparency = 1
         tabBtn.BorderSizePixel = 0
-        tabBtn.Font = Enum.Font.SourceSansItalic
-        tabBtn.TextSize = 14
-        tabBtn.TextColor3 = Library.Theme.TabInactiveText
-        tabBtn.TextXAlignment = Enum.TextXAlignment.Left
-        tabBtn.Text = "  " .. tabName
         tabBtn.AutoButtonColor = false
+        tabBtn.Text = ""
         tabBtn.Parent = navBar
+
+        local tabCorner = Instance.new("UICorner")
+        tabCorner.CornerRadius = UDim.new(0, 6)
+        tabCorner.Parent = tabBtn
 
         local tabStroke = Instance.new("UIStroke")
         tabStroke.Color = Library.Theme.TabActiveBorder
         tabStroke.Thickness = 1
-        tabStroke.Enabled = false
+        tabStroke.Transparency = 1
         tabStroke.Parent = tabBtn
+
+        -- Glowing indicator strip on the left edge
+        local tabGlowBar = Instance.new("Frame")
+        tabGlowBar.Name = "GlowBar"
+        tabGlowBar.Size = UDim2.new(0, 3, 0, 16)
+        tabGlowBar.Position = UDim2.new(0, 4, 0.5, -8)
+        tabGlowBar.BackgroundColor3 = Library.Theme.Accent
+        tabGlowBar.BorderSizePixel = 0
+        tabGlowBar.BackgroundTransparency = 1
+        tabGlowBar.Parent = tabBtn
+
+        local barCorner = Instance.new("UICorner")
+        barCorner.CornerRadius = UDim.new(1, 0)
+        barCorner.Parent = tabGlowBar
+
+        local tabLabel = Instance.new("TextLabel")
+        tabLabel.Name = "Label"
+        tabLabel.Size = UDim2.new(1, -22, 1, 0)
+        tabLabel.Position = UDim2.new(0, 14, 0, 0)
+        tabLabel.BackgroundTransparency = 1
+        tabLabel.Font = Library.Theme.FontTab
+        tabLabel.TextSize = 13
+        tabLabel.TextColor3 = Library.Theme.TabInactiveText
+        tabLabel.TextXAlignment = Enum.TextXAlignment.Left
+        tabLabel.Text = tabName
+        tabLabel.Parent = tabBtn
 
         local tabContent = Instance.new("ScrollingFrame")
         tabContent.Name = "TabContent_" .. tabName
@@ -752,23 +859,96 @@ function Library.CreateWindow(config)
         local tabData = {
             Name = tabName,
             Button = tabBtn,
+            Label = tabLabel,
+            GlowBar = tabGlowBar,
             Stroke = tabStroke,
             Content = tabContent,
             Left = leftCol,
             Right = rightCol,
         }
 
+        local function updateTabAppearance(active, hovered)
+            if active then
+                TweenService:Create(tabBtn, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                    BackgroundColor3 = Library.Theme.TabActiveBg,
+                    BackgroundTransparency = 0
+                }):Play()
+                TweenService:Create(tabLabel, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                    TextColor3 = Library.Theme.TabActiveText,
+                    Position = UDim2.new(0, 16, 0, 0)
+                }):Play()
+                TweenService:Create(tabGlowBar, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                    BackgroundTransparency = 0,
+                    Size = UDim2.new(0, 3, 0, 16)
+                }):Play()
+                TweenService:Create(tabStroke, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                    Transparency = 0
+                }):Play()
+            elseif hovered then
+                TweenService:Create(tabBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                    BackgroundColor3 = Library.Theme.TabHoverBg,
+                    BackgroundTransparency = 0.5
+                }):Play()
+                TweenService:Create(tabLabel, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                    TextColor3 = Color3.fromRGB(220, 220, 230),
+                    Position = UDim2.new(0, 15, 0, 0)
+                }):Play()
+                TweenService:Create(tabGlowBar, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                    BackgroundTransparency = 0.6,
+                    Size = UDim2.new(0, 3, 0, 8)
+                }):Play()
+            else
+                TweenService:Create(tabBtn, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                    BackgroundTransparency = 1
+                }):Play()
+                TweenService:Create(tabLabel, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                    TextColor3 = Library.Theme.TabInactiveText,
+                    Position = UDim2.new(0, 14, 0, 0)
+                }):Play()
+                TweenService:Create(tabGlowBar, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(0, 3, 0, 4)
+                }):Play()
+                TweenService:Create(tabStroke, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                    Transparency = 1
+                }):Play()
+            end
+        end
+
+        tabBtn.MouseEnter:Connect(function()
+            if Window.CurrentTab ~= tabData then
+                updateTabAppearance(false, true)
+            end
+        end)
+
+        tabBtn.MouseLeave:Connect(function()
+            if Window.CurrentTab ~= tabData then
+                updateTabAppearance(false, false)
+            end
+        end)
+
         local function selectTab()
             for _, t in ipairs(Window.Tabs) do
-                t.Content.Visible = false
-                t.Stroke.Enabled = false
-                t.Button.BackgroundTransparency = 1
-                t.Button.TextColor3 = Library.Theme.TabInactiveText
+                if t ~= tabData then
+                    t.Content.Visible = false
+                    TweenService:Create(t.Button, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                        BackgroundTransparency = 1
+                    }):Play()
+                    TweenService:Create(t.Label, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                        TextColor3 = Library.Theme.TabInactiveText,
+                        Position = UDim2.new(0, 14, 0, 0)
+                    }):Play()
+                    TweenService:Create(t.GlowBar, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                        BackgroundTransparency = 1,
+                        Size = UDim2.new(0, 3, 0, 4)
+                    }):Play()
+                    TweenService:Create(t.Stroke, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                        Transparency = 1
+                    }):Play()
+                end
             end
             tabData.Content.Visible = true
-            tabData.Button.BackgroundTransparency = 0
-            tabData.Button.BackgroundColor3 = Library.Theme.TabActiveBg
-            tabData.Button.TextColor3 = Library.Theme.TabActiveText
+            updateTabAppearance(true, false)
             Window.CurrentTab = tabData
         end
 
@@ -792,6 +972,10 @@ function Library.CreateWindow(config)
             groupbox.BackgroundColor3 = Library.Theme.GroupboxBg
             groupbox.BorderSizePixel = 0
             groupbox.Parent = parentCol
+
+            local groupCorner = Instance.new("UICorner")
+            groupCorner.CornerRadius = UDim.new(0, 4)
+            groupCorner.Parent = groupbox
 
             local groupStroke = Instance.new("UIStroke")
             groupStroke.Color = Library.Theme.GroupboxBorder
