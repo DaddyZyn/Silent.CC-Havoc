@@ -752,9 +752,19 @@ function Library.CreateWindow(config)
 
     makeDraggable(contentArea, mainFrame)
 
+    -- Top-level Popup Overlay Frame (Bypasses scrolling frame clipping)
+    local popupOverlay = Instance.new("Frame")
+    popupOverlay.Name = "PopupOverlay"
+    popupOverlay.Size = UDim2.new(1, 0, 1, 0)
+    popupOverlay.Position = UDim2.new(0, 0, 0, 0)
+    popupOverlay.BackgroundTransparency = 1
+    popupOverlay.ZIndex = 9000
+    popupOverlay.Parent = screenGui
+
     local Window = {
         ScreenGui = screenGui,
         MainFrame = mainFrame,
+        PopupOverlay = popupOverlay,
         Tabs = {},
         CurrentTab = nil,
     }
@@ -1366,17 +1376,16 @@ function Library.CreateWindow(config)
                 local dropContainer = Instance.new("Frame")
                 dropContainer.Name = string.format("%03d_Dropdown_%s", order, label)
                 dropContainer.LayoutOrder = order
-                dropContainer.Size = UDim2.new(1, 0, 0, 42)
+                dropContainer.Size = UDim2.new(1, 0, 0, 44)
                 dropContainer.BackgroundTransparency = 1
                 dropContainer.ClipsDescendants = false
-                dropContainer.ZIndex = 20
                 dropContainer.Parent = itemsContainer
 
                 local dropTitle = Instance.new("TextLabel")
                 dropTitle.Name = "Label"
                 dropTitle.Size = UDim2.new(1, 0, 0, 14)
                 dropTitle.BackgroundTransparency = 1
-                dropTitle.Font = Enum.Font.RobotoMono
+                dropTitle.Font = Library.Theme.FontBody
                 dropTitle.TextSize = 11
                 dropTitle.TextColor3 = Library.Theme.LabelText
                 dropTitle.TextXAlignment = Enum.TextXAlignment.Left
@@ -1385,116 +1394,196 @@ function Library.CreateWindow(config)
 
                 local dropBtn = Instance.new("TextButton")
                 dropBtn.Name = "SelectBox"
-                dropBtn.Size = UDim2.new(1, 0, 0, 24)
+                dropBtn.Size = UDim2.new(1, 0, 0, 26)
                 dropBtn.Position = UDim2.new(0, 0, 0, 16)
                 dropBtn.BackgroundColor3 = Library.Theme.InputBg
                 dropBtn.BorderSizePixel = 0
-                dropBtn.Font = Enum.Font.RobotoMono
-                dropBtn.TextSize = 11
-                dropBtn.TextColor3 = Library.Theme.LabelText
-                dropBtn.TextXAlignment = Enum.TextXAlignment.Left
-                dropBtn.Text = "  " .. tostring(selected)
                 dropBtn.AutoButtonColor = false
-                dropBtn.ZIndex = 21
+                dropBtn.Text = ""
                 dropBtn.Parent = dropContainer
+
+                local btnCorner = Instance.new("UICorner")
+                btnCorner.CornerRadius = UDim.new(0, 4)
+                btnCorner.Parent = dropBtn
 
                 local dropStroke = Instance.new("UIStroke")
                 dropStroke.Color = Library.Theme.InputBorder
                 dropStroke.Thickness = 1
                 dropStroke.Parent = dropBtn
 
+                local valLabel = Instance.new("TextLabel")
+                valLabel.Name = "ValueLabel"
+                valLabel.Size = UDim2.new(1, -26, 1, 0)
+                valLabel.Position = UDim2.new(0, 8, 0, 0)
+                valLabel.BackgroundTransparency = 1
+                valLabel.Font = Library.Theme.FontBody
+                valLabel.TextSize = 11
+                valLabel.TextColor3 = Library.Theme.LabelText
+                valLabel.TextXAlignment = Enum.TextXAlignment.Left
+                valLabel.Text = tostring(selected)
+                valLabel.Parent = dropBtn
+
                 local arrow = Instance.new("TextLabel")
                 arrow.Name = "Arrow"
                 arrow.Size = UDim2.new(0, 20, 1, 0)
-                arrow.Position = UDim2.new(1, -20, 0, 0)
+                arrow.Position = UDim2.new(1, -22, 0, 0)
                 arrow.BackgroundTransparency = 1
-                arrow.Font = Enum.Font.RobotoMono
+                arrow.Font = Library.Theme.FontBody
                 arrow.TextSize = 10
                 arrow.TextColor3 = Library.Theme.MutedText
-                arrow.Text = "v"
-                arrow.ZIndex = 22
+                arrow.Text = "▼"
                 arrow.Parent = dropBtn
 
-                local optionsFrame = Instance.new("ScrollingFrame")
-                optionsFrame.Name = "Options"
-                optionsFrame.Position = UDim2.new(0, 0, 1, 3)
-                optionsFrame.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
-                optionsFrame.BorderSizePixel = 0
-                optionsFrame.ScrollBarThickness = 3
-                optionsFrame.ScrollBarImageColor3 = Library.Theme.Accent
-                optionsFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-                optionsFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-                optionsFrame.ZIndex = 500
-                optionsFrame.Visible = false
-                optionsFrame.Parent = dropBtn
+                -- Floating Overlay Options Menu (Parented to popupOverlay to avoid scroll clipping)
+                local popMenu = Instance.new("Frame")
+                popMenu.Name = "DropPopup_" .. label
+                popMenu.BackgroundColor3 = Color3.fromRGB(14, 14, 18)
+                popMenu.BorderSizePixel = 0
+                popMenu.Visible = false
+                popMenu.ZIndex = 9500
+                popMenu.Parent = Window.PopupOverlay
 
-                local optStroke = Instance.new("UIStroke")
-                optStroke.Color = Library.Theme.WindowStroke
-                optStroke.Thickness = 1
-                optStroke.Parent = optionsFrame
+                local popCorner = Instance.new("UICorner")
+                popCorner.CornerRadius = UDim.new(0, 4)
+                popCorner.Parent = popMenu
+
+                local popStroke = Instance.new("UIStroke")
+                popStroke.Color = Library.Theme.WindowStroke
+                popStroke.Thickness = 1
+                popStroke.Parent = popMenu
+
+                local scrollList = Instance.new("ScrollingFrame")
+                scrollList.Name = "Scroll"
+                scrollList.Size = UDim2.new(1, 0, 1, 0)
+                scrollList.BackgroundTransparency = 1
+                scrollList.BorderSizePixel = 0
+                scrollList.ScrollBarThickness = 3
+                scrollList.ScrollBarImageColor3 = Library.Theme.Accent
+                scrollList.CanvasSize = UDim2.new(0, 0, 0, 0)
+                scrollList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+                scrollList.ZIndex = 9501
+                scrollList.Parent = popMenu
+
+                local listPad = Instance.new("UIPadding")
+                listPad.PaddingTop = UDim.new(0, 3)
+                listPad.PaddingBottom = UDim.new(0, 3)
+                listPad.PaddingLeft = UDim.new(0, 3)
+                listPad.PaddingRight = UDim.new(0, 3)
+                listPad.Parent = scrollList
 
                 local optLayout = Instance.new("UIListLayout")
                 optLayout.FillDirection = Enum.FillDirection.Vertical
                 optLayout.SortOrder = Enum.SortOrder.LayoutOrder
-                optLayout.Padding = UDim.new(0, 1)
-                optLayout.Parent = optionsFrame
+                optLayout.Padding = UDim.new(0, 2)
+                optLayout.Parent = scrollList
 
-                local function populateOptions(list, currentSel)
-                    for _, child in ipairs(optionsFrame:GetChildren()) do
-                        if child:IsA("TextButton") then child:Destroy() end
+                local function closeDropdown()
+                    isOpen = false
+                    popMenu.Visible = false
+                    arrow.Text = "▼"
+                    TweenService:Create(dropStroke, TweenInfo.new(0.15), { Color = Library.Theme.InputBorder }):Play()
+                end
+
+                local function updatePopupPosition()
+                    local absPos = dropBtn.AbsolutePosition
+                    local absSize = dropBtn.AbsoluteSize
+                    popMenu.Position = UDim2.new(0, absPos.X, 0, absPos.Y + absSize.Y + 3)
+                    popMenu.Size = UDim2.new(0, absSize.X, 0, math.clamp(#currentItems * 26 + 6, 26, 160))
+                end
+
+                local function populateOptions()
+                    for _, c in ipairs(scrollList:GetChildren()) do
+                        if c:IsA("TextButton") then c:Destroy() end
                     end
-                    local count = #list
-                    local frameH = math.clamp(count * 24, 24, 150)
-                    optionsFrame.Size = UDim2.new(1, 0, 0, frameH)
 
-                    for idx, item in ipairs(list) do
-                        local opt = Instance.new("TextButton")
-                        opt.Name = "Item_" .. tostring(item)
-                        opt.LayoutOrder = idx
-                        opt.Size = UDim2.new(1, 0, 0, 22)
-                        opt.BackgroundColor3 = (item == currentSel) and Color3.fromRGB(25, 25, 30) or Color3.fromRGB(16, 16, 20)
-                        opt.BorderSizePixel = 0
-                        opt.Font = Enum.Font.RobotoMono
-                        opt.TextSize = 11
-                        opt.TextColor3 = (item == currentSel) and Library.Theme.Accent or Library.Theme.LabelText
-                        opt.TextXAlignment = Enum.TextXAlignment.Left
-                        opt.Text = "  " .. tostring(item)
-                        opt.ZIndex = 505
-                        opt.AutoButtonColor = false
-                        opt.Parent = optionsFrame
+                    for idx, item in ipairs(currentItems) do
+                        local isSel = (item == selected)
+                        local optBtn = Instance.new("TextButton")
+                        optBtn.Name = "Opt_" .. tostring(item)
+                        optBtn.LayoutOrder = idx
+                        optBtn.Size = UDim2.new(1, 0, 0, 24)
+                        optBtn.BackgroundColor3 = isSel and Color3.fromRGB(24, 24, 30) or Color3.fromRGB(14, 14, 18)
+                        optBtn.BackgroundTransparency = isSel and 0 or 1
+                        optBtn.BorderSizePixel = 0
+                        optBtn.AutoButtonColor = false
+                        optBtn.Font = Library.Theme.FontBody
+                        optBtn.TextSize = 11
+                        optBtn.TextColor3 = isSel and Library.Theme.Accent or Library.Theme.LabelText
+                        optBtn.TextXAlignment = Enum.TextXAlignment.Left
+                        optBtn.Text = "  " .. tostring(item)
+                        optBtn.ZIndex = 9502
+                        optBtn.Parent = scrollList
 
-                        opt.MouseButton1Click:Connect(function()
+                        local oCorner = Instance.new("UICorner")
+                        oCorner.CornerRadius = UDim.new(0, 3)
+                        oCorner.Parent = optBtn
+
+                        optBtn.MouseEnter:Connect(function()
+                            if item ~= selected then
+                                optBtn.BackgroundTransparency = 0
+                                optBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+                            end
+                        end)
+                        optBtn.MouseLeave:Connect(function()
+                            if item ~= selected then
+                                optBtn.BackgroundTransparency = 1
+                            end
+                        end)
+
+                        optBtn.MouseButton1Click:Connect(function()
                             selected = item
-                            dropBtn.Text = "  " .. tostring(selected)
-                            optionsFrame.Visible = false
-                            isOpen = false
-                            arrow.Text = "v"
-                            populateOptions(list, selected)
+                            valLabel.Text = tostring(selected)
+                            closeDropdown()
+                            populateOptions()
                             if callback then pcall(callback, selected) end
                         end)
                     end
                 end
 
-                populateOptions(currentItems, selected)
+                populateOptions()
 
                 dropBtn.MouseButton1Click:Connect(function()
                     isOpen = not isOpen
-                    optionsFrame.Visible = isOpen
-                    arrow.Text = isOpen and "^" or "v"
+                    if isOpen then
+                        updatePopupPosition()
+                        popMenu.Visible = true
+                        arrow.Text = "▲"
+                        TweenService:Create(dropStroke, TweenInfo.new(0.15), { Color = Library.Theme.Accent }):Play()
+                    else
+                        closeDropdown()
+                    end
+                end)
+
+                -- Auto close when clicking outside or resizing
+                UserInputService.InputBegan:Connect(function(input)
+                    if isOpen and input.UserInputType == Enum.UserInputType.MouseButton1 then
+                        local mPos = UserInputService:GetMouseLocation()
+                        local pPos = popMenu.AbsolutePosition
+                        local pSize = popMenu.AbsoluteSize
+                        local bPos = dropBtn.AbsolutePosition
+                        local bSize = dropBtn.AbsoluteSize
+
+                        local inPop = mPos.X >= pPos.X and mPos.X <= pPos.X + pSize.X and mPos.Y >= pPos.Y and mPos.Y <= pPos.Y + pSize.Y
+                        local inBtn = mPos.X >= bPos.X and mPos.X <= bPos.X + bSize.X and mPos.Y >= bPos.Y and mPos.Y <= bPos.Y + bSize.Y
+
+                        if not inPop and not inBtn then
+                            closeDropdown()
+                        end
+                    end
                 end)
 
                 return {
                     SetValue = function(newVal)
                         selected = newVal
-                        dropBtn.Text = "  " .. tostring(selected)
-                        populateOptions(currentItems, selected)
+                        valLabel.Text = tostring(selected)
+                        populateOptions()
                         if callback then pcall(callback, selected) end
                     end,
                     SetOptions = function(newList, newDefault)
                         currentItems = newList or {}
                         selected = newDefault or currentItems[1] or "None"
-                        dropBtn.Text = "  " .. tostring(selected)
-                        populateOptions(currentItems, selected)
+                        valLabel.Text = tostring(selected)
+                        populateOptions()
                     end,
                     GetValue = function() return selected end,
                 }
@@ -1503,19 +1592,20 @@ function Library.CreateWindow(config)
             function Group:AddColorPicker(label, default, callback)
                 local currentColor = default or Color3.fromRGB(0, 255, 170)
                 local order = nextOrder()
+                local isOpen = false
 
                 local colorRow = Instance.new("Frame")
                 colorRow.Name = string.format("%03d_Color_%s", order, label)
                 colorRow.LayoutOrder = order
-                colorRow.Size = UDim2.new(1, 0, 0, 22)
+                colorRow.Size = UDim2.new(1, 0, 0, 24)
                 colorRow.BackgroundTransparency = 1
                 colorRow.Parent = itemsContainer
 
                 local colorLabel = Instance.new("TextLabel")
                 colorLabel.Name = "Label"
-                colorLabel.Size = UDim2.new(1, -50, 1, 0)
+                colorLabel.Size = UDim2.new(1, -54, 1, 0)
                 colorLabel.BackgroundTransparency = 1
-                colorLabel.Font = Enum.Font.RobotoMono
+                colorLabel.Font = Library.Theme.FontBody
                 colorLabel.TextSize = 11
                 colorLabel.TextColor3 = Library.Theme.LabelText
                 colorLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -1524,23 +1614,168 @@ function Library.CreateWindow(config)
 
                 local colorPreview = Instance.new("TextButton")
                 colorPreview.Name = "Preview"
-                colorPreview.Size = UDim2.new(0, 38, 0, 16)
-                colorPreview.Position = UDim2.new(1, -38, 0.5, -8)
+                colorPreview.Size = UDim2.new(0, 42, 0, 18)
+                colorPreview.Position = UDim2.new(1, -42, 0.5, -9)
                 colorPreview.BackgroundColor3 = currentColor
                 colorPreview.BorderSizePixel = 0
+                colorPreview.AutoButtonColor = false
                 colorPreview.Text = ""
                 colorPreview.Parent = colorRow
+
+                local cpCorner = Instance.new("UICorner")
+                cpCorner.CornerRadius = UDim.new(0, 4)
+                cpCorner.Parent = colorPreview
 
                 local previewStroke = Instance.new("UIStroke")
                 previewStroke.Color = Library.Theme.InputBorder
                 previewStroke.Thickness = 1
                 previewStroke.Parent = colorPreview
 
+                -- Interactive Color Picker Palette Popup
+                local pickerPopup = Instance.new("Frame")
+                pickerPopup.Name = "ColorPopup_" .. label
+                pickerPopup.Size = UDim2.new(0, 170, 0, 110)
+                pickerPopup.BackgroundColor3 = Color3.fromRGB(14, 14, 18)
+                pickerPopup.BorderSizePixel = 0
+                pickerPopup.Visible = false
+                pickerPopup.ZIndex = 9600
+                pickerPopup.Parent = Window.PopupOverlay
+
+                local pkCorner = Instance.new("UICorner")
+                pkCorner.CornerRadius = UDim.new(0, 5)
+                pkCorner.Parent = pickerPopup
+
+                local pkStroke = Instance.new("UIStroke")
+                pkStroke.Color = Library.Theme.WindowStroke
+                pkStroke.Thickness = 1
+                pkStroke.Parent = pickerPopup
+
+                local pkTitle = Instance.new("TextLabel")
+                pkTitle.Size = UDim2.new(1, -12, 0, 18)
+                pkTitle.Position = UDim2.new(0, 8, 0, 4)
+                pkTitle.BackgroundTransparency = 1
+                pkTitle.Font = Library.Theme.FontTitle
+                pkTitle.TextSize = 10
+                pkTitle.TextColor3 = Library.Theme.LabelText
+                pkTitle.TextXAlignment = Enum.TextXAlignment.Left
+                pkTitle.Text = label
+                pkTitle.ZIndex = 9601
+                pkTitle.Parent = pickerPopup
+
+                local paletteGrid = Instance.new("Frame")
+                paletteGrid.Size = UDim2.new(1, -16, 0, 48)
+                paletteGrid.Position = UDim2.new(0, 8, 0, 24)
+                paletteGrid.BackgroundTransparency = 1
+                paletteGrid.ZIndex = 9601
+                paletteGrid.Parent = pickerPopup
+
+                local gridLayout = Instance.new("UIGridLayout")
+                gridLayout.CellSize = UDim2.new(0, 22, 0, 20)
+                gridLayout.CellPadding = UDim2.new(0, 4, 0, 4)
+                gridLayout.Parent = paletteGrid
+
+                local presets = {
+                    Color3.fromRGB(255, 255, 255), Color3.fromRGB(200, 200, 205),
+                    Color3.fromRGB(0, 200, 255),   Color3.fromRGB(0, 255, 170),
+                    Color3.fromRGB(255, 75, 75),   Color3.fromRGB(255, 180, 50),
+                    Color3.fromRGB(200, 100, 255), Color3.fromRGB(255, 90, 160),
+                    Color3.fromRGB(70, 70, 85),    Color3.fromRGB(255, 230, 80),
+                    Color3.fromRGB(50, 150, 255),  Color3.fromRGB(30, 220, 100),
+                }
+
+                local function applyColor(col)
+                    currentColor = col
+                    colorPreview.BackgroundColor3 = currentColor
+                    if callback then pcall(callback, currentColor) end
+                end
+
+                for _, col in ipairs(presets) do
+                    local cell = Instance.new("TextButton")
+                    cell.BackgroundColor3 = col
+                    cell.BorderSizePixel = 0
+                    cell.AutoButtonColor = false
+                    cell.Text = ""
+                    cell.ZIndex = 9602
+                    cell.Parent = paletteGrid
+
+                    local cCorner = Instance.new("UICorner")
+                    cCorner.CornerRadius = UDim.new(0, 3)
+                    cCorner.Parent = cell
+
+                    local cStroke = Instance.new("UIStroke")
+                    cStroke.Color = Color3.fromRGB(40, 40, 48)
+                    cStroke.Thickness = 1
+                    cStroke.Parent = cell
+
+                    cell.MouseButton1Click:Connect(function()
+                        applyColor(col)
+                    end)
+                end
+
+                -- RGB Hex / Value readout
+                local rgbBox = Instance.new("TextBox")
+                rgbBox.Size = UDim2.new(1, -16, 0, 22)
+                rgbBox.Position = UDim2.new(0, 8, 0, 78)
+                rgbBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+                rgbBox.BorderSizePixel = 0
+                rgbBox.Font = Library.Theme.FontBody
+                rgbBox.TextSize = 10
+                rgbBox.TextColor3 = Library.Theme.Accent
+                rgbBox.PlaceholderColor3 = Library.Theme.MutedText
+                rgbBox.PlaceholderText = "R, G, B (e.g. 255, 0, 0)"
+                rgbBox.Text = string.format("%d, %d, %d", math.floor(currentColor.R * 255), math.floor(currentColor.G * 255), math.floor(currentColor.B * 255))
+                rgbBox.ZIndex = 9601
+                rgbBox.Parent = pickerPopup
+
+                local bCorner = Instance.new("UICorner")
+                bCorner.CornerRadius = UDim.new(0, 3)
+                bCorner.Parent = rgbBox
+
+                rgbBox.FocusLost:Connect(function()
+                    local r, g, b = rgbBox.Text:match("(%d+)[%s,]+(%d+)[%s,]+(%d+)")
+                    if r and g and b then
+                        local newC = Color3.fromRGB(tonumber(r), tonumber(g), tonumber(b))
+                        applyColor(newC)
+                    end
+                end)
+
+                local function closePicker()
+                    isOpen = false
+                    pickerPopup.Visible = false
+                end
+
+                colorPreview.MouseButton1Click:Connect(function()
+                    isOpen = not isOpen
+                    if isOpen then
+                        local absPos = colorPreview.AbsolutePosition
+                        pickerPopup.Position = UDim2.new(0, absPos.X - 175, 0, absPos.Y - 20)
+                        pickerPopup.Visible = true
+                    else
+                        closePicker()
+                    end
+                end)
+
+                UserInputService.InputBegan:Connect(function(input)
+                    if isOpen and input.UserInputType == Enum.UserInputType.MouseButton1 then
+                        local mPos = UserInputService:GetMouseLocation()
+                        local pPos = pickerPopup.AbsolutePosition
+                        local pSize = pickerPopup.AbsoluteSize
+                        local bPos = colorPreview.AbsolutePosition
+                        local bSize = colorPreview.AbsoluteSize
+
+                        local inPop = mPos.X >= pPos.X and mPos.X <= pPos.X + pSize.X and mPos.Y >= pPos.Y and mPos.Y <= pPos.Y + pSize.Y
+                        local inBtn = mPos.X >= bPos.X and mPos.X <= bPos.X + bSize.X and mPos.Y >= bPos.Y and mPos.Y <= bPos.Y + bSize.Y
+
+                        if not inPop and not inBtn then
+                            closePicker()
+                        end
+                    end
+                end)
+
                 return {
                     SetColor = function(newColor)
-                        currentColor = newColor
-                        colorPreview.BackgroundColor3 = currentColor
-                        if callback then pcall(callback, currentColor) end
+                        applyColor(newColor)
+                        rgbBox.Text = string.format("%d, %d, %d", math.floor(newColor.R * 255), math.floor(newColor.G * 255), math.floor(newColor.B * 255))
                     end,
                     GetColor = function() return currentColor end,
                 }
@@ -1803,7 +2038,7 @@ local function cleanupModelEsp(model)
 end
 
 -- =========================================================================
--- SECTION 9: MENU INITIALIZATION
+-- SECTION 9: MENU INITIALIZATION & SPLASH INTRO
 -- =========================================================================
 local Window = Library.CreateWindow({
     Title = "silent.cc",
@@ -1812,6 +2047,136 @@ local Window = Library.CreateWindow({
     Size = Vector2.new(680, 720),
     ToggleKey = Enum.KeyCode.RightShift,
 })
+
+-- Startup Splash Loading Animation
+task.spawn(function()
+    -- Temporarily hide main menu window during intro sequence
+    Window.MainFrame.Visible = false
+
+    local introGui = Instance.new("ScreenGui")
+    introGui.Name = "silent_intro_" .. tostring(math.random(10000, 99999))
+    introGui.ResetOnSpawn = false
+    introGui.DisplayOrder = 1000000
+    pcall(function()
+        introGui.Parent = Window.ScreenGui.Parent
+    end)
+
+    local introCard = Instance.new("Frame")
+    introCard.Name = "IntroCard"
+    introCard.Size = UDim2.new(0, 320, 0, 110)
+    introCard.Position = UDim2.new(0.5, -160, 0.5, -55)
+    introCard.BackgroundColor3 = Color3.fromRGB(11, 11, 14)
+    introCard.BorderSizePixel = 0
+    introCard.BackgroundTransparency = 1
+    introCard.Parent = introGui
+
+    local icCorner = Instance.new("UICorner")
+    icCorner.CornerRadius = UDim.new(0, 8)
+    icCorner.Parent = introCard
+
+    local icStroke = Instance.new("UIStroke")
+    icStroke.Color = Color3.fromRGB(35, 35, 42)
+    icStroke.Thickness = 1
+    icStroke.Transparency = 1
+    icStroke.Parent = introCard
+
+    local icGlow = Instance.new("ImageLabel")
+    icGlow.Name = "Glow"
+    icGlow.Size = UDim2.new(1, 30, 1, 30)
+    icGlow.Position = UDim2.new(0, -15, 0, -15)
+    icGlow.BackgroundTransparency = 1
+    icGlow.Image = "rbxassetid://5028857084"
+    icGlow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+    icGlow.ImageTransparency = 1
+    icGlow.ScaleType = Enum.ScaleType.Slice
+    icGlow.SliceCenter = Rect.new(24, 24, 276, 276)
+    icGlow.ZIndex = introCard.ZIndex - 1
+    icGlow.Parent = introCard
+
+    local titleLbl = Instance.new("TextLabel")
+    titleLbl.Size = UDim2.new(1, 0, 0, 24)
+    titleLbl.Position = UDim2.new(0, 0, 0, 20)
+    titleLbl.BackgroundTransparency = 1
+    titleLbl.Font = Library.Theme.FontTitle
+    titleLbl.TextSize = 16
+    titleLbl.TextColor3 = Color3.fromRGB(245, 245, 250)
+    titleLbl.TextTransparency = 1
+    titleLbl.Text = "Silent.cc Havoc"
+    titleLbl.Parent = introCard
+
+    local statusLbl = Instance.new("TextLabel")
+    statusLbl.Size = UDim2.new(1, 0, 0, 18)
+    statusLbl.Position = UDim2.new(0, 0, 0, 48)
+    statusLbl.BackgroundTransparency = 1
+    statusLbl.Font = Library.Theme.FontBody
+    statusLbl.TextSize = 12
+    statusLbl.TextColor3 = Color3.fromRGB(150, 150, 160)
+    statusLbl.TextTransparency = 1
+    statusLbl.Text = "Loading..."
+    statusLbl.Parent = introCard
+
+    local barBg = Instance.new("Frame")
+    barBg.Size = UDim2.new(1, -40, 0, 3)
+    barBg.Position = UDim2.new(0, 20, 0, 78)
+    barBg.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+    barBg.BorderSizePixel = 0
+    barBg.BackgroundTransparency = 1
+    barBg.Parent = introCard
+
+    local bbCorner = Instance.new("UICorner")
+    bbCorner.CornerRadius = UDim.new(1, 0)
+    bbCorner.Parent = barBg
+
+    local barFill = Instance.new("Frame")
+    barFill.Size = UDim2.new(0, 0, 1, 0)
+    barFill.BackgroundColor3 = Color3.fromRGB(240, 240, 245)
+    barFill.BorderSizePixel = 0
+    barFill.Parent = barBg
+
+    local bfCorner = Instance.new("UICorner")
+    bfCorner.CornerRadius = UDim.new(1, 0)
+    bfCorner.Parent = barFill
+
+    -- Phase 1: Fade In Loading Screen
+    TweenService:Create(introCard, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { BackgroundTransparency = 0 }):Play()
+    TweenService:Create(icStroke, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { Transparency = 0 }):Play()
+    TweenService:Create(icGlow, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { ImageTransparency = 0.3 }):Play()
+    TweenService:Create(titleLbl, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { TextTransparency = 0 }):Play()
+    TweenService:Create(statusLbl, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { TextTransparency = 0 }):Play()
+    TweenService:Create(barBg, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { BackgroundTransparency = 0 }):Play()
+
+    -- Fill progress bar smoothly
+    TweenService:Create(barFill, TweenInfo.new(1.1, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { Size = UDim2.new(1, 0, 1, 0) }):Play()
+    task.wait(1.15)
+
+    -- Phase 2: Switch text to Welcome <User>
+    local playerName = LocalPlayer and LocalPlayer.Name or "Operator"
+    statusLbl.Text = "Welcome, " .. playerName
+    statusLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    task.wait(0.85)
+
+    -- Phase 3: Fade Out Loading Box
+    TweenService:Create(introCard, TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.In), { BackgroundTransparency = 1 }):Play()
+    TweenService:Create(icStroke, TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.In), { Transparency = 1 }):Play()
+    TweenService:Create(icGlow, TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.In), { ImageTransparency = 1 }):Play()
+    TweenService:Create(titleLbl, TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.In), { TextTransparency = 1 }):Play()
+    TweenService:Create(statusLbl, TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.In), { TextTransparency = 1 }):Play()
+    local barFade = TweenService:Create(barBg, TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.In), { BackgroundTransparency = 1 })
+    barFade:Play()
+    TweenService:Create(barFill, TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.In), { BackgroundTransparency = 1 }):Play()
+
+    barFade.Completed:Connect(function()
+        introGui:Destroy()
+        -- Phase 4: Smoothly Reveal Main Menu Window
+        Window.MainFrame.Visible = true
+        Window.MainFrame.Size = UDim2.new(0, 680 * 0.96, 0, 720 * 0.96)
+        Window.MainFrame.BackgroundTransparency = 0.4
+        TweenService:Create(Window.MainFrame, TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, 680, 0, 720),
+            BackgroundTransparency = 0
+        }):Play()
+    end)
+end)
 
 -- TAB 1: MAIN
 local MainTab = Window:CreateTab("Main")
@@ -2279,13 +2644,15 @@ RunService.RenderStepped:Connect(function()
                     local headPos, headOn = Camera:WorldToViewportPoint(head3D)
                     local rootPos, rootOn = Camera:WorldToViewportPoint(root3D)
 
-                    -- Frustum Culling: discard points behind camera or with near-plane projection blowouts
-                    if hrpPos.Z > 1.5 and headPos.Z > 1.5 and rootPos.Z > 1.5 and (hrpOn or headOn or rootOn) then
-                        local rawHeight = math.abs(headPos.Y - rootPos.Y)
+                    -- Super Smooth Frustum Culling: discard points behind near-plane and clamp jitter
+                    if hrpPos.Z > 1.2 and headPos.Z > 1.2 and rootPos.Z > 1.2 and (hrpOn or headOn or rootOn) then
+                        local minY = math.min(headPos.Y, rootPos.Y)
+                        local maxY = math.max(headPos.Y, rootPos.Y)
+                        local rawHeight = maxY - minY
                         local maxScreenHeight = Camera.ViewportSize.Y * 0.85
-                        local height = math.clamp(rawHeight, 8, maxScreenHeight)
-                        local width = math.clamp(height * 0.62, 6, Camera.ViewportSize.X * 0.5)
-                        local boxPos = Vector2.new(hrpPos.X - width / 2, headPos.Y)
+                        local height = math.clamp(rawHeight, 10, maxScreenHeight)
+                        local width = math.clamp(height * 0.60, 6, Camera.ViewportSize.X * 0.45)
+                        local boxPos = Vector2.new(math.floor(hrpPos.X - width / 2), math.floor(minY))
 
                         if Config.Esp.Boxes then
                             esp.BoxOutline.Size = Vector2.new(width, height)
