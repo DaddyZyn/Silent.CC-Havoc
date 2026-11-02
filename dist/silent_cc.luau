@@ -1072,16 +1072,20 @@ function Library.CreateWindow(config)
             subBtn.Name = string.format("SubTab_%02d_%s", subIdx, subName)
             subBtn.Size = UDim2.new(0, 0, 1, 0)
             subBtn.AutomaticSize = Enum.AutomaticSize.X
-            subBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
+            subBtn.BackgroundColor3 = Color3.fromRGB(13, 13, 16)
             subBtn.BorderSizePixel = 0
             subBtn.AutoButtonColor = false
-            subBtn.Text = ""
+            subBtn.Font = Library.Theme.FontTab
+            subBtn.TextSize = 12
+            subBtn.TextColor3 = Library.Theme.TabInactiveText
+            subBtn.Text = subName
             subBtn.LayoutOrder = subIdx
+            subBtn.ZIndex = 51
             subBtn.Parent = subtabBar
 
             local sPad = Instance.new("UIPadding")
-            sPad.PaddingLeft = UDim.new(0, 14)
-            sPad.PaddingRight = UDim.new(0, 14)
+            sPad.PaddingLeft = UDim.new(0, 16)
+            sPad.PaddingRight = UDim.new(0, 16)
             sPad.Parent = subBtn
 
             local sCorner = Instance.new("UICorner")
@@ -1091,17 +1095,8 @@ function Library.CreateWindow(config)
             local sStroke = Instance.new("UIStroke")
             sStroke.Color = Color3.fromRGB(32, 32, 38)
             sStroke.Thickness = 1
+            sStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
             sStroke.Parent = subBtn
-
-            local sLabel = Instance.new("TextLabel")
-            sLabel.Name = "Text"
-            sLabel.Size = UDim2.new(1, 0, 1, 0)
-            sLabel.BackgroundTransparency = 1
-            sLabel.Font = Library.Theme.FontBody
-            sLabel.TextSize = 11
-            sLabel.TextColor3 = Library.Theme.MutedText
-            sLabel.Text = subName
-            sLabel.Parent = subBtn
 
             local subCols = Instance.new("Frame")
             subCols.Name = "Columns_" .. subName
@@ -1143,7 +1138,6 @@ function Library.CreateWindow(config)
             local subObj = {
                 Name = subName,
                 Button = subBtn,
-                Label = sLabel,
                 Stroke = sStroke,
                 Columns = subCols,
                 Left = sLeft,
@@ -1153,14 +1147,22 @@ function Library.CreateWindow(config)
             local function setSubActive(active)
                 if active then
                     subCols.Visible = true
-                    TweenService:Create(subBtn, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(24, 24, 30) }):Play()
-                    TweenService:Create(sStroke, TweenInfo.new(0.15), { Color = Library.Theme.Accent }):Play()
-                    TweenService:Create(sLabel, TweenInfo.new(0.15), { TextColor3 = Color3.fromRGB(255, 255, 255) }):Play()
+                    TweenService:Create(subBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                        BackgroundColor3 = Color3.fromRGB(24, 24, 30),
+                        TextColor3 = Color3.fromRGB(255, 255, 255)
+                    }):Play()
+                    TweenService:Create(sStroke, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                        Color = Library.Theme.Accent
+                    }):Play()
                 else
                     subCols.Visible = false
-                    TweenService:Create(subBtn, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(15, 15, 18) }):Play()
-                    TweenService:Create(sStroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(32, 32, 38) }):Play()
-                    TweenService:Create(sLabel, TweenInfo.new(0.15), { TextColor3 = Library.Theme.MutedText }):Play()
+                    TweenService:Create(subBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                        BackgroundColor3 = Color3.fromRGB(13, 13, 16),
+                        TextColor3 = Library.Theme.TabInactiveText
+                    }):Play()
+                    TweenService:Create(sStroke, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                        Color = Color3.fromRGB(30, 30, 36)
+                    }):Play()
                 end
             end
 
@@ -1173,13 +1175,15 @@ function Library.CreateWindow(config)
 
             subBtn.MouseEnter:Connect(function()
                 if currentSubtab ~= subObj then
-                    TweenService:Create(sStroke, TweenInfo.new(0.12), { Color = Color3.fromRGB(60, 60, 72) }):Play()
+                    TweenService:Create(sStroke, TweenInfo.new(0.12), { Color = Color3.fromRGB(56, 56, 68) }):Play()
+                    TweenService:Create(subBtn, TweenInfo.new(0.12), { TextColor3 = Color3.fromRGB(210, 210, 220) }):Play()
                 end
             end)
 
             subBtn.MouseLeave:Connect(function()
                 if currentSubtab ~= subObj then
-                    TweenService:Create(sStroke, TweenInfo.new(0.12), { Color = Color3.fromRGB(32, 32, 38) }):Play()
+                    TweenService:Create(sStroke, TweenInfo.new(0.12), { Color = Color3.fromRGB(30, 30, 36) }):Play()
+                    TweenService:Create(subBtn, TweenInfo.new(0.12), { TextColor3 = Library.Theme.TabInactiveText }):Play()
                 end
             end)
 
@@ -3055,7 +3059,7 @@ WeaponMechanicsGroup:AddToggle("Disable Weapon Bobbing", Config.Misc.NoBobbing, 
 })
 
 -- Survival & Engine Subtab
-local SurvivalGroup = SurvivalSub:CreateGroupbox("Survival & Health", "Left")
+local SurvivalGroup = SurvivalSub:CreateGroupbox("Engine & Survival", "Left")
 SurvivalGroup:AddToggle("Zero Stamina Drain", Config.Misc.InfiniteStamina, {
     Callback = function(v)
         Config.Misc.InfiniteStamina = v
@@ -3072,13 +3076,6 @@ SurvivalGroup:AddToggle("No Action Slowdown", Config.Misc.NoSlowdown, {
     Callback = function(v)
         Config.Misc.NoSlowdown = v
         Config.Character.NoSlowdown = v
-    end
-})
-
-local CombatExploitsGroup = SurvivalSub:CreateGroupbox("Combat Exploits", "Right")
-CombatExploitsGroup:AddToggle("Wallbang (Shoot Through Walls)", Config.SilentAim.Wallbang, {
-    Callback = function(v)
-        Config.SilentAim.Wallbang = v
     end
 })
 
