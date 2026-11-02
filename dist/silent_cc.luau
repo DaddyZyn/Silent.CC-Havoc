@@ -159,6 +159,16 @@ local Config = {
         FastReload = false,
         NoRecoil = false,
         NoSpread = false,
+    },
+    Misc = {
+        NoRecoil = false,
+        MaxErgonomics = false,
+        FastReload = false,
+        InstantADS = false,
+        NoBobbing = false,
+        InfiniteStamina = true,
+        AntiFallDamage = true,
+        NoSlowdown = true,
     }
 }
 
@@ -2757,7 +2767,59 @@ WeaponGroup:AddToggle("Fast Tactical Reload", Config.Character.FastReload, { Cal
 WeaponGroup:AddToggle("Recoil Neutralizer", Config.Character.NoRecoil, { Callback = function(v) Config.Character.NoRecoil = v end })
 WeaponGroup:AddToggle("Spread Reduction", Config.Character.NoSpread, { Callback = function(v) Config.Character.NoSpread = v end })
 
--- TAB 5: SETTINGS
+-- TAB 5: MISC
+local MiscTab = Window:CreateTab("Misc")
+
+local MiscCombatGroup = MiscTab:CreateGroupbox("Combat & Weapon Handling", "Left")
+MiscCombatGroup:AddToggle("Recoil Neutralizer", Config.Misc.NoRecoil, {
+    Callback = function(v)
+        Config.Misc.NoRecoil = v
+        Config.Character.NoRecoil = v
+    end
+})
+MiscCombatGroup:AddToggle("Max Weapon Ergonomics", Config.Misc.MaxErgonomics, {
+    Callback = function(v)
+        Config.Misc.MaxErgonomics = v
+    end
+})
+MiscCombatGroup:AddToggle("Tactical Fast Reload", Config.Misc.FastReload, {
+    Callback = function(v)
+        Config.Misc.FastReload = v
+        Config.Character.FastReload = v
+    end
+})
+MiscCombatGroup:AddToggle("Instant ADS Speed", Config.Misc.InstantADS, {
+    Callback = function(v)
+        Config.Misc.InstantADS = v
+    end
+})
+MiscCombatGroup:AddToggle("Disable Weapon Bobbing", Config.Misc.NoBobbing, {
+    Callback = function(v)
+        Config.Misc.NoBobbing = v
+    end
+})
+
+local MiscEngineGroup = MiscTab:CreateGroupbox("Engine & Survival", "Right")
+MiscEngineGroup:AddToggle("Zero Stamina Drain", Config.Misc.InfiniteStamina, {
+    Callback = function(v)
+        Config.Misc.InfiniteStamina = v
+        Config.Character.InfiniteStamina = v
+    end
+})
+MiscEngineGroup:AddToggle("Zero Fall Damage", Config.Misc.AntiFallDamage, {
+    Callback = function(v)
+        Config.Misc.AntiFallDamage = v
+        Config.Character.AntiFallDamage = v
+    end
+})
+MiscEngineGroup:AddToggle("No Action Slowdown", Config.Misc.NoSlowdown, {
+    Callback = function(v)
+        Config.Misc.NoSlowdown = v
+        Config.Character.NoSlowdown = v
+    end
+})
+
+-- TAB 6: SETTINGS
 local SettingsTab = Window:CreateTab("Settings")
 
 local ProfileGroup = SettingsTab:CreateGroupbox("Profile Manager", "Left")
@@ -3392,17 +3454,17 @@ task.spawn(function()
                     if type(obj) == "table" then
                         -- Realism Table: recoilReductionRatio & fallDamage
                         if rawget(obj, "recoilReductionRatio") ~= nil and rawget(obj, "fallDamage") ~= nil then
-                            if Config.Character.NoRecoil then
+                            if Config.Character.NoRecoil or Config.Misc.NoRecoil then
                                 rawset(obj, "recoilReductionRatio", 0)
                             end
-                            if Config.Character.AntiFallDamage then
+                            if Config.Character.AntiFallDamage or Config.Misc.AntiFallDamage then
                                 rawset(obj, "fallDamage", 0)
                             end
                         end
 
                         -- Stamina Table: drainRate & regenRate
                         if rawget(obj, "drainRate") ~= nil and rawget(obj, "regenRate") ~= nil then
-                            if Config.Character.InfiniteStamina then
+                            if Config.Character.InfiniteStamina or Config.Misc.InfiniteStamina then
                                 rawset(obj, "drainRate", 0)
                                 rawset(obj, "regenRate", 100)
                             end
@@ -3412,16 +3474,24 @@ task.spawn(function()
             end
         end)
 
-        -- Scripts.Client getMagErgonomics hook
+        -- Scripts.Client Hooks: Ergonomics, Instant ADS, NoBobbing
         pcall(function()
-            if Config.Character.FastReload and LocalPlayer and LocalPlayer.Character then
+            if LocalPlayer and LocalPlayer.Character then
                 local scripts = LocalPlayer.Character:FindFirstChild("Scripts")
                 local clientScript = scripts and scripts:FindFirstChild("Client")
                 local getsenv_fn = getsenv or (getgenv and getgenv().getsenv)
                 if clientScript and typeof(getsenv_fn) == "function" then
                     local env = getsenv_fn(clientScript)
-                    if env and typeof(env.getMagErgonomics) == "function" then
-                        env.getMagErgonomics = function(...) return 100 end
+                    if env then
+                        if (Config.Misc.MaxErgonomics or Config.Character.FastReload) and typeof(env.getMagErgonomics) == "function" then
+                            env.getMagErgonomics = function(...) return 100 end
+                        end
+                        if Config.Misc.InstantADS and typeof(env.shared) == "table" then
+                            env.shared.aimAlpha = 1
+                        end
+                        if Config.Misc.NoBobbing and typeof(env.bobbing) == "function" then
+                            env.bobbing = function(...) return CFrame.identity end
+                        end
                     end
                 end
             end
@@ -3431,7 +3501,7 @@ end)
 
 -- BaseCamera _recoilCF Nullification on RenderStepped
 RunService.RenderStepped:Connect(function()
-    if Config.Character.NoRecoil and LocalPlayer and LocalPlayer.Character then
+    if (Config.Character.NoRecoil or Config.Misc.NoRecoil) and LocalPlayer and LocalPlayer.Character then
         pcall(function()
             local scripts = LocalPlayer.Character:FindFirstChild("Scripts")
             local camScript = scripts and scripts:FindFirstChild("Camera")
