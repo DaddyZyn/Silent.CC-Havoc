@@ -147,6 +147,35 @@ local Config = {
         VisibleColor = Color3.fromRGB(230, 230, 230),
         HiddenColor = Color3.fromRGB(120, 120, 120),
         Transparency = 0,
+        ViewmodelChams = false,
+        ViewmodelMaterial = "ForceField",
+        ViewmodelColor = Color3.fromRGB(0, 255, 170),
+        ViewmodelTransparency = 0.2,
+        ArmsChams = false,
+        ArmsColor = Color3.fromRGB(255, 255, 255),
+    },
+    CombatVisuals = {
+        TargetSnapline = false,
+        TargetSnaplineColor = Color3.fromRGB(255, 50, 50),
+        TargetDot = false,
+        TargetDotColor = Color3.fromRGB(255, 0, 80),
+        BulletTracers = false,
+        BulletTracerColor = Color3.fromRGB(0, 255, 200),
+        BulletTracerDuration = 0.6,
+    },
+    WorldExtra = {
+        Extractions = false,
+        Corpses = false,
+        DuffelBags = false,
+        Mines = false,
+        ExtractionColor = Color3.fromRGB(0, 255, 100),
+        CorpseColor = Color3.fromRGB(160, 160, 170),
+        DuffelColor = Color3.fromRGB(255, 200, 0),
+        MineColor = Color3.fromRGB(255, 40, 40),
+    },
+    Exploits = {
+        InstantLockpick = false,
+        InstantInteract = false,
     },
     Character = {
         SpeedOverride = false,
@@ -334,12 +363,25 @@ local function inspectLootInstance(inst)
             if not name or name == "" then name = parent.Name end
 
             local lower = string.lower(name)
-            local isContainer = string.find(lower, "crate") or string.find(lower, "box") or string.find(lower, "safe") or string.find(lower, "container") or string.find(lower, "bag") or string.find(lower, "chest")
+            local category = "Item"
+            if string.find(lower, "extract") or string.find(lower, "exfil") or string.find(lower, "evac") or string.find(lower, "exit") then
+                category = "Extraction"
+            elseif string.find(lower, "duffel") or string.find(lower, "backpack") then
+                category = "Duffel"
+            elseif string.find(lower, "corpse") or string.find(lower, "body") or string.find(lower, "dead") then
+                category = "Corpse"
+            elseif string.find(lower, "mine") or string.find(lower, "claymore") or string.find(lower, "tripwire") or string.find(lower, "trap") then
+                category = "Mine"
+            elseif string.find(lower, "crate") or string.find(lower, "box") or string.find(lower, "safe") or string.find(lower, "container") or string.find(lower, "chest") then
+                category = "Container"
+            end
+
             return {
                 Instance = parent,
                 Name = name,
                 Position = pos,
-                IsContainer = isContainer,
+                IsContainer = (category == "Container"),
+                Category = category,
             }
         end
     end
@@ -352,6 +394,7 @@ local function inspectLootInstance(inst)
                 Name = inst.Name,
                 Position = handle.Position,
                 IsContainer = false,
+                Category = "Item",
             }
         end
     end
@@ -370,6 +413,37 @@ local function scanWorldLoot()
             if item then found[item.Instance] = item end
         end
     end
+
+    -- Corpse & Duffel Bag scanner (Ragdolls & World models)
+    if Config.WorldExtra.Corpses or Config.WorldExtra.DuffelBags or Config.WorldExtra.Mines or Config.WorldExtra.Extractions then
+        for _, child in ipairs(Workspace:GetChildren()) do
+            if child:IsA("Model") and not found[child] then
+                local lower = string.lower(child.Name)
+                if Config.WorldExtra.Corpses and (lower:find("ragdoll") or lower:find("corpse") or lower:find("clientragdoll")) then
+                    local p = child.PrimaryPart or child:FindFirstChild("HumanoidRootPart") or child:FindFirstChildOfClass("BasePart")
+                    if p then
+                        found[child] = { Instance = child, Name = "Corpse", Position = p.Position, Category = "Corpse" }
+                    end
+                elseif Config.WorldExtra.DuffelBags and (lower:find("duffel") or lower:find("bag") or lower:find("backpack")) then
+                    local p = child.PrimaryPart or child:FindFirstChildOfClass("BasePart")
+                    if p then
+                        found[child] = { Instance = child, Name = "Duffel Bag", Position = p.Position, Category = "Duffel" }
+                    end
+                elseif Config.WorldExtra.Mines and (lower:find("mine") or lower:find("claymore") or lower:find("tripwire") or lower:find("trap")) then
+                    local p = child.PrimaryPart or child:FindFirstChildOfClass("BasePart")
+                    if p then
+                        found[child] = { Instance = child, Name = "Landmine / Trap", Position = p.Position, Category = "Mine" }
+                    end
+                elseif Config.WorldExtra.Extractions and (lower:find("extract") or lower:find("exfil") or lower:find("evac")) then
+                    local p = child.PrimaryPart or child:FindFirstChildOfClass("BasePart")
+                    if p then
+                        found[child] = { Instance = child, Name = "Exit Zone", Position = p.Position, Category = "Extraction" }
+                    end
+                end
+            end
+        end
+    end
+
     ActiveLoot = found
 end
 
@@ -383,6 +457,23 @@ task.spawn(function()
 end)
 
 -- =========================================================================
+local ActiveBulletTracers = {}
+local targetSnaplineDrawing = nil
+local targetDotDrawing = nil
+
+if hasDrawing then
+    pcall(function()
+        targetSnaplineDrawing = Drawing.new("Line")
+        targetSnaplineDrawing.Visible = false
+        targetSnaplineDrawing.Thickness = 1.5
+
+        targetDotDrawing = Drawing.new("Circle")
+        targetDotDrawing.Visible = false
+        targetDotDrawing.Radius = 4
+        targetDotDrawing.Filled = true
+    end)
+end
+
 -- SECTION 5: COMBAT HOOKS & HIT REDIRECTION (CLEAN SILENT AIM)
 -- =========================================================================
 local currentSilentTargetBone = nil
@@ -402,6 +493,27 @@ if typeof(hookmeta) == "function" then
             -- 2. Recoil Shake Suppression
             if Config.Character.NoRecoil and (method == "FireServer" or method == "fireServer") and tostring(self.Name) == "shake" then
                 return
+            end
+
+            -- Record Bullet Tracer on hitPos
+            if Config.CombatVisuals.BulletTracers and (method == "FireServer" or method == "fireServer") and tostring(self.Name) == "hitPos" then
+                local endP = typeof(args[2]) == "Vector3" and args[2] or (currentSilentTargetBone and currentSilentTargetBone.Position)
+                if endP then
+                    local startP = Camera.CFrame.Position + Vector3.new(0, -0.4, 0)
+                    local tracerLine = hasDrawing and Drawing.new("Line") or nil
+                    if tracerLine then
+                        tracerLine.Thickness = 1.5
+                        tracerLine.Transparency = 1
+                        tracerLine.Color = Config.CombatVisuals.BulletTracerColor
+                    end
+                    table.insert(ActiveBulletTracers, {
+                        Start = startP,
+                        End = endP,
+                        SpawnTime = os.clock(),
+                        Duration = Config.CombatVisuals.BulletTracerDuration or 0.6,
+                        Line = tracerLine,
+                    })
+                end
             end
 
             -- 3. hitPos Redirection (Silent Aim & Wallbang Penetration)
@@ -2856,6 +2968,24 @@ end)
 SilentSettingsGroup:AddSlider("Wallbang Max Distance", 50, 1000, Config.SilentAim.WallbangDistance, " studs", function(v)
     Config.SilentAim.WallbangDistance = v
 end)
+SilentSettingsGroup:AddToggle("Target Snapline", Config.CombatVisuals.TargetSnapline, {
+    Callback = function(v) Config.CombatVisuals.TargetSnapline = v end
+})
+SilentSettingsGroup:AddColorPicker("Snapline Color", Config.CombatVisuals.TargetSnaplineColor, function(c)
+    Config.CombatVisuals.TargetSnaplineColor = c
+end)
+SilentSettingsGroup:AddToggle("Target Locked Dot", Config.CombatVisuals.TargetDot, {
+    Callback = function(v) Config.CombatVisuals.TargetDot = v end
+})
+SilentSettingsGroup:AddColorPicker("Target Dot Color", Config.CombatVisuals.TargetDotColor, function(c)
+    Config.CombatVisuals.TargetDotColor = c
+end)
+SilentSettingsGroup:AddToggle("Bullet Tracers", Config.CombatVisuals.BulletTracers, {
+    Callback = function(v) Config.CombatVisuals.BulletTracers = v end
+})
+SilentSettingsGroup:AddColorPicker("Tracer Color", Config.CombatVisuals.BulletTracerColor, function(c)
+    Config.CombatVisuals.BulletTracerColor = c
+end)
 SilentSettingsGroup:AddToggle("Sticky Aim", Config.SilentAim.StickyAim, { Callback = function(v) Config.SilentAim.StickyAim = v end })
 SilentSettingsGroup:AddSlider("Sticky Range", 100, 1000, Config.SilentAim.StickyRange, "", function(v) Config.SilentAim.StickyRange = v end)
 SilentSettingsGroup:AddToggle("Show Circle", Config.SilentAim.ShowCircle, {
@@ -2914,13 +3044,18 @@ EspConfigGroup:AddSlider("Max Distance", 100, 3000, Config.Esp.MaxDistance, " st
 
 -- World & Loot Subtab
 local ChamsGroup = WorldSub:CreateGroupbox("Chams & Shaders", "Left")
-ChamsGroup:AddToggle("Enable Chams", Config.Visuals.Chams, { Callback = function(v) Config.Visuals.Chams = v end })
+ChamsGroup:AddToggle("Enable Player Chams", Config.Visuals.Chams, { Callback = function(v) Config.Visuals.Chams = v end })
 ChamsGroup:AddColorPicker("Visible Color", Config.Visuals.VisibleColor, function(col) Config.Visuals.VisibleColor = col end)
 ChamsGroup:AddColorPicker("Hidden Color", Config.Visuals.HiddenColor, function(col) Config.Visuals.HiddenColor = col end)
 ChamsGroup:AddSlider("Outline Transparency", 0, 100, Config.Visuals.Transparency, "%", function(v) Config.Visuals.Transparency = v end)
+ChamsGroup:AddToggle("Viewmodel Gun Chams", Config.Visuals.ViewmodelChams, { Callback = function(v) Config.Visuals.ViewmodelChams = v end })
+ChamsGroup:AddDropdown("Gun Material", { "ForceField", "Neon", "Glass" }, Config.Visuals.ViewmodelMaterial, function(v) Config.Visuals.ViewmodelMaterial = v end)
+ChamsGroup:AddColorPicker("Gun Color", Config.Visuals.ViewmodelColor, function(c) Config.Visuals.ViewmodelColor = c end)
+ChamsGroup:AddToggle("Viewmodel Arm Chams", Config.Visuals.ArmsChams, { Callback = function(v) Config.Visuals.ArmsChams = v end })
+ChamsGroup:AddColorPicker("Arm Color", Config.Visuals.ArmsColor, function(c) Config.Visuals.ArmsColor = c end)
 
-local WorldGroup = WorldSub:CreateGroupbox("World Loot ESP", "Right")
-WorldGroup:AddToggle("Enable Loot ESP", Config.Loot.Enabled, {
+local WorldGroup = WorldSub:CreateGroupbox("World Loot & Extraction ESP", "Right")
+WorldGroup:AddToggle("Enable World ESP", Config.Loot.Enabled, {
     Callback = function(v)
         Config.Loot.Enabled = v
         if v then pcall(scanWorldLoot) end
@@ -2928,9 +3063,15 @@ WorldGroup:AddToggle("Enable Loot ESP", Config.Loot.Enabled, {
 })
 WorldGroup:AddToggle("Dropped Weapons & Items", Config.Loot.Weapons, { Callback = function(v) Config.Loot.Weapons = v end })
 WorldGroup:AddToggle("Crates & Safes", Config.Loot.Containers, { Callback = function(v) Config.Loot.Containers = v end })
-WorldGroup:AddSlider("Loot Max Distance", 50, 800, Config.Loot.MaxDistance, " studs", function(v) Config.Loot.MaxDistance = v end)
-WorldGroup:AddColorPicker("Item Color", Config.Loot.ItemColor, function(col) Config.Loot.ItemColor = col end)
-WorldGroup:AddColorPicker("Crate / Safe Color", Config.Loot.ContainerColor, function(col) Config.Loot.ContainerColor = col end)
+WorldGroup:AddToggle("Extraction / Exfil Zones", Config.WorldExtra.Extractions, { Callback = function(v) Config.WorldExtra.Extractions = v end })
+WorldGroup:AddColorPicker("Extraction Color", Config.WorldExtra.ExtractionColor, function(c) Config.WorldExtra.ExtractionColor = c end)
+WorldGroup:AddToggle("Corpse / Dead Bodies", Config.WorldExtra.Corpses, { Callback = function(v) Config.WorldExtra.Corpses = v end })
+WorldGroup:AddColorPicker("Corpse Color", Config.WorldExtra.CorpseColor, function(c) Config.WorldExtra.CorpseColor = c end)
+WorldGroup:AddToggle("Duffel Bags", Config.WorldExtra.DuffelBags, { Callback = function(v) Config.WorldExtra.DuffelBags = v end })
+WorldGroup:AddColorPicker("Duffel Color", Config.WorldExtra.DuffelColor, function(c) Config.WorldExtra.DuffelColor = c end)
+WorldGroup:AddToggle("Anti-Mines & Traps", Config.WorldExtra.Mines, { Callback = function(v) Config.WorldExtra.Mines = v end })
+WorldGroup:AddColorPicker("Mine Color", Config.WorldExtra.MineColor, function(c) Config.WorldExtra.MineColor = c end)
+WorldGroup:AddSlider("Max Distance", 50, 1500, Config.Loot.MaxDistance, " studs", function(v) Config.Loot.MaxDistance = v end)
 
 
 -- TAB 3: CHARACTER (ALL MOVEMENT FEATURES)
@@ -3077,6 +3218,14 @@ SurvivalGroup:AddToggle("No Action Slowdown", Config.Misc.NoSlowdown, {
         Config.Misc.NoSlowdown = v
         Config.Character.NoSlowdown = v
     end
+})
+
+local RaidExploitsGroup = SurvivalSub:CreateGroupbox("Raid & Interaction Exploits", "Right")
+RaidExploitsGroup:AddToggle("Instant Lockpick (Bypass Mini-Game)", Config.Exploits.InstantLockpick, {
+    Callback = function(v) Config.Exploits.InstantLockpick = v end
+})
+RaidExploitsGroup:AddToggle("Instant Fast Interact (No Hold Delay)", Config.Exploits.InstantInteract, {
+    Callback = function(v) Config.Exploits.InstantInteract = v end
 })
 
 
@@ -3268,6 +3417,92 @@ RunService.RenderStepped:Connect(function()
         currentSilentTargetBone = target and target.Bone or nil
     else
         currentSilentTargetBone = nil
+    end
+
+    -- Target Snapline & Target Locked Dot Visualizer
+    if hasDrawing and (targetSnaplineDrawing or targetDotDrawing) then
+        local activeTarget = currentSilentTargetBone
+        if activeTarget and (Config.CombatVisuals.TargetSnapline or Config.CombatVisuals.TargetDot) then
+            local s3d, onScreen = Camera:WorldToViewportPoint(activeTarget.Position)
+            if onScreen and s3d.Z > 0 then
+                local targetScreenPos = Vector2.new(s3d.X, s3d.Y)
+
+                if Config.CombatVisuals.TargetSnapline and targetSnaplineDrawing then
+                    targetSnaplineDrawing.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                    targetSnaplineDrawing.To = targetScreenPos
+                    targetSnaplineDrawing.Color = Config.CombatVisuals.TargetSnaplineColor
+                    targetSnaplineDrawing.Visible = true
+                elseif targetSnaplineDrawing then
+                    targetSnaplineDrawing.Visible = false
+                end
+
+                if Config.CombatVisuals.TargetDot and targetDotDrawing then
+                    targetDotDrawing.Position = targetScreenPos
+                    targetDotDrawing.Color = Config.CombatVisuals.TargetDotColor
+                    targetDotDrawing.Visible = true
+                elseif targetDotDrawing then
+                    targetDotDrawing.Visible = false
+                end
+            else
+                if targetSnaplineDrawing then targetSnaplineDrawing.Visible = false end
+                if targetDotDrawing then targetDotDrawing.Visible = false end
+            end
+        else
+            if targetSnaplineDrawing then targetSnaplineDrawing.Visible = false end
+            if targetDotDrawing then targetDotDrawing.Visible = false end
+        end
+    end
+
+    -- Viewmodel & Arm Chams Shader
+    if Config.Visuals.ViewmodelChams or Config.Visuals.ArmsChams then
+        pcall(function()
+            local vm = Camera:FindFirstChild("Viewmodel") or Camera:FindFirstChild("Arms")
+            if not vm and LocalPlayer.Character then
+                vm = LocalPlayer.Character:FindFirstChild("Viewmodel")
+            end
+            if vm then
+                local matEnum = Enum.Material[Config.Visuals.ViewmodelMaterial] or Enum.Material.ForceField
+                for _, part in ipairs(vm:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        local pName = string.lower(part.Name)
+                        local isArm = pName:find("arm") or pName:find("hand") or pName:find("sleeve")
+                        if isArm and Config.Visuals.ArmsChams then
+                            part.Material = Enum.Material.ForceField
+                            part.Color = Config.Visuals.ArmsColor
+                            part.Transparency = Config.Visuals.ViewmodelTransparency
+                        elseif not isArm and Config.Visuals.ViewmodelChams then
+                            part.Material = matEnum
+                            part.Color = Config.Visuals.ViewmodelColor
+                            part.Transparency = Config.Visuals.ViewmodelTransparency
+                        end
+                    end
+                end
+            end
+        end)
+    end
+
+    -- Bullet Tracers Render Loop
+    if #ActiveBulletTracers > 0 then
+        local now = os.clock()
+        for idx = #ActiveBulletTracers, 1, -1 do
+            local tracer = ActiveBulletTracers[idx]
+            local age = now - tracer.SpawnTime
+            if age >= tracer.Duration then
+                if tracer.Line then pcall(function() tracer.Line:Remove() end) end
+                table.remove(ActiveBulletTracers, idx)
+            elseif tracer.Line then
+                local s3d1, on1 = Camera:WorldToViewportPoint(tracer.Start)
+                local s3d2, on2 = Camera:WorldToViewportPoint(tracer.End)
+                if (on1 or on2) and s3d1.Z > 0 and s3d2.Z > 0 then
+                    tracer.Line.From = Vector2.new(s3d1.X, s3d1.Y)
+                    tracer.Line.To = Vector2.new(s3d2.X, s3d2.Y)
+                    tracer.Line.Transparency = math.clamp(1 - (age / tracer.Duration), 0, 1)
+                    tracer.Line.Visible = true
+                else
+                    tracer.Line.Visible = false
+                end
+            end
+        end
     end
 
     -- 3. Aimbot Loop (Camera & Mouse Rel)
@@ -3516,7 +3751,34 @@ RunService.RenderStepped:Connect(function()
                 ActiveLoot[inst] = nil
             else
                 local dist = (loot.Position - Camera.CFrame.Position).Magnitude
-                local showItem = (loot.IsContainer and Config.Loot.Containers) or (not loot.IsContainer and Config.Loot.Weapons)
+                local showItem = false
+                local col = Config.Loot.ItemColor
+                local prefix = "[LOOT] "
+
+                if loot.Category == "Extraction" then
+                    showItem = Config.WorldExtra.Extractions
+                    col = Config.WorldExtra.ExtractionColor
+                    prefix = "[EXTRACT] "
+                elseif loot.Category == "Corpse" then
+                    showItem = Config.WorldExtra.Corpses
+                    col = Config.WorldExtra.CorpseColor
+                    prefix = "[CORPSE] "
+                elseif loot.Category == "Duffel" then
+                    showItem = Config.WorldExtra.DuffelBags
+                    col = Config.WorldExtra.DuffelColor
+                    prefix = "[DUFFEL] "
+                elseif loot.Category == "Mine" then
+                    showItem = Config.WorldExtra.Mines
+                    col = Config.WorldExtra.MineColor
+                    prefix = "[!] MINE "
+                elseif loot.IsContainer then
+                    showItem = Config.Loot.Containers
+                    col = Config.Loot.ContainerColor
+                    prefix = "[CRATE] "
+                else
+                    showItem = Config.Loot.Weapons
+                end
+
                 local lootBb = inst:FindFirstChild("silent_loot_bb")
 
                 if dist <= Config.Loot.MaxDistance and showItem then
@@ -3545,9 +3807,8 @@ RunService.RenderStepped:Connect(function()
                         lootBb.Enabled = true
                         local lbl = lootBb:FindFirstChild("LootLabel")
                         if lbl then
-                            local col = loot.IsContainer and Config.Loot.ContainerColor or Config.Loot.ItemColor
                             lbl.TextColor3 = col
-                            lbl.Text = string.format("%s%s [%dm]", loot.IsContainer and "[CRATE] " or "[LOOT] ", loot.Name, math.floor(dist))
+                            lbl.Text = string.format("%s%s [%dm]", prefix, loot.Name, math.floor(dist))
                         end
                     else
                         if lootBb then lootBb.Enabled = false end
@@ -3808,6 +4069,14 @@ task.spawn(function()
                         end
                         if Config.Misc.NoBobbing and typeof(env.bobbing) == "function" then
                             env.bobbing = function(...) return CFrame.identity end
+                        end
+                        -- Instant Lockpick Exploit
+                        if Config.Exploits.InstantLockpick and typeof(env.handleLockpick) == "function" then
+                            env.handleLockpick = function(...) return true end
+                        end
+                        -- Fast / Instant Interact Exploit
+                        if Config.Exploits.InstantInteract and typeof(env.createLoadingIconInteract) == "function" then
+                            env.createLoadingIconInteract = function(...) return end
                         end
                         -- Overweight & Loot Weight Nullification
                         if (Config.Character.ZeroWeight or Config.Misc.ZeroWeight) then
