@@ -156,6 +156,8 @@ local Config = {
         InfiniteStamina = true,
         NoSlowdown = true,
         BunnyHop = false,
+        WallClimb = false,
+        WallClimbSpeed = 16,
         FastReload = false,
         NoRecoil = false,
         NoSpread = false,
@@ -169,6 +171,7 @@ local Config = {
         InfiniteStamina = true,
         AntiFallDamage = true,
         NoSlowdown = true,
+        WallClimb = false,
     }
 }
 
@@ -2761,6 +2764,15 @@ MovementGroup:AddSlider("Fly Speed", 5, 21, Config.Character.FlySpeed, " studs",
     Config.Character.FlySpeed = v
 end)
 MovementGroup:AddToggle("Bunny Hop", Config.Character.BunnyHop, { Callback = function(v) Config.Character.BunnyHop = v end })
+MovementGroup:AddToggle("Wall Climb (Spider)", Config.Character.WallClimb, {
+    Callback = function(v)
+        Config.Character.WallClimb = v
+        Config.Misc.WallClimb = v
+    end
+})
+MovementGroup:AddSlider("Climb Speed", 8, 20, Config.Character.WallClimbSpeed, " studs", function(v)
+    Config.Character.WallClimbSpeed = v
+end)
 
 local WeaponGroup = CharTab:CreateGroupbox("Weapon Handling", "Right")
 WeaponGroup:AddToggle("Fast Tactical Reload", Config.Character.FastReload, { Callback = function(v) Config.Character.FastReload = v end })
@@ -2816,6 +2828,12 @@ MiscEngineGroup:AddToggle("No Action Slowdown", Config.Misc.NoSlowdown, {
     Callback = function(v)
         Config.Misc.NoSlowdown = v
         Config.Character.NoSlowdown = v
+    end
+})
+MiscEngineGroup:AddToggle("Wall Climb (Spider)", Config.Misc.WallClimb, {
+    Callback = function(v)
+        Config.Misc.WallClimb = v
+        Config.Character.WallClimb = v
     end
 })
 
@@ -3411,7 +3429,37 @@ RunService.Heartbeat:Connect(function()
 
         hrp.AssemblyLinearVelocity = Vector3.new(targetHorizVel.X, targetYVel, targetHorizVel.Z)
 
-    -- 2. WalkSpeed Override via Direct Linear Velocity
+    -- 2. Wall Climb Engine (Spider Ledge Detection & Normal Ascent)
+    elseif (Config.Character.WallClimb or Config.Misc.WallClimb) and not Config.Character.Fly then
+        local wallRayParams = RaycastParams.new()
+        wallRayParams.FilterType = Enum.RaycastFilterType.Exclude
+        wallRayParams.FilterDescendantsInstances = { Camera, char }
+
+        local forwardDir = hrp.CFrame.LookVector
+        local wallHit = Workspace:Raycast(hrp.Position, forwardDir * 2.8, wallRayParams)
+        if not wallHit then
+            wallHit = Workspace:Raycast(hrp.Position + Vector3.new(0, 1.5, 0), forwardDir * 2.8, wallRayParams)
+        end
+
+        if wallHit and wallHit.Instance and wallHit.Instance.CanCollide then
+            local wantsClimb = UserInputService:IsKeyDown(Enum.KeyCode.W) or hum.MoveDirection.Magnitude > 0 or UserInputService:IsKeyDown(Enum.KeyCode.Space)
+            if wantsClimb then
+                local climbSpeed = math.clamp(Config.Character.WallClimbSpeed or 16, 8, 20.4)
+                local ledgeCheck = Workspace:Raycast(hrp.Position + Vector3.new(0, 3.2, 0), forwardDir * 3.0, wallRayParams)
+                if not ledgeCheck then
+                    -- Reached ledge: Vault up & over
+                    hrp.AssemblyLinearVelocity = Vector3.new(forwardDir.X * 14, 8, forwardDir.Z * 14)
+                else
+                    -- Stick to wall and ascend smoothly
+                    hrp.AssemblyLinearVelocity = Vector3.new(wallHit.Normal.X * -1.5, climbSpeed, wallHit.Normal.Z * -1.5)
+                end
+            end
+        elseif Config.Character.SpeedOverride and hum.MoveDirection.Magnitude > 0 then
+            local moveDir = hum.MoveDirection.Unit
+            hrp.AssemblyLinearVelocity = Vector3.new(moveDir.X * maxAllowedSpeed, currentVel.Y, moveDir.Z * maxAllowedSpeed)
+        end
+
+    -- 3. WalkSpeed Override via Direct Linear Velocity
     elseif Config.Character.SpeedOverride and hum.MoveDirection.Magnitude > 0 then
         local moveDir = hum.MoveDirection.Unit
         hrp.AssemblyLinearVelocity = Vector3.new(moveDir.X * maxAllowedSpeed, currentVel.Y, moveDir.Z * maxAllowedSpeed)
