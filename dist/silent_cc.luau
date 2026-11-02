@@ -107,6 +107,7 @@ local Config = {
         WallSpread = false,
         DistanceLimit = false,
         MaxDistance = 150,
+        MagicBullets = false,
     },
     Esp = {
         Enabled = false,
@@ -1017,10 +1018,174 @@ function Library.CreateWindow(config)
 
         local Tab = {}
         local groupboxCount = 0
+        local subtabBar = nil
+        local subtabs = {}
+        local currentSubtab = nil
+
+        function Tab:CreateSubtab(subName)
+            if not subtabBar then
+                columns.Visible = false
+
+                subtabBar = Instance.new("Frame")
+                subtabBar.Name = "SubtabBar"
+                subtabBar.Size = UDim2.new(1, 0, 0, 32)
+                subtabBar.BackgroundTransparency = 1
+                subtabBar.LayoutOrder = 0
+                subtabBar.Parent = tabCanvasGroup
+
+                local subPad = Instance.new("UIPadding")
+                subPad.PaddingBottom = UDim.new(0, 6)
+                subPad.Parent = subtabBar
+
+                local subLayout = Instance.new("UIListLayout")
+                subLayout.FillDirection = Enum.FillDirection.Horizontal
+                subLayout.SortOrder = Enum.SortOrder.LayoutOrder
+                subLayout.Padding = UDim.new(0, 6)
+                subLayout.Parent = subtabBar
+            end
+
+            local subIdx = #subtabs + 1
+
+            local subBtn = Instance.new("TextButton")
+            subBtn.Name = string.format("SubTab_%02d_%s", subIdx, subName)
+            subBtn.Size = UDim2.new(0, 0, 1, -4)
+            subBtn.AutomaticSize = Enum.AutomaticSize.X
+            subBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
+            subBtn.BorderSizePixel = 0
+            subBtn.AutoButtonColor = false
+            subBtn.Text = ""
+            subBtn.LayoutOrder = subIdx
+            subBtn.Parent = subtabBar
+
+            local sPad = Instance.new("UIPadding")
+            sPad.PaddingLeft = UDim.new(0, 14)
+            sPad.PaddingRight = UDim.new(0, 14)
+            sPad.Parent = subBtn
+
+            local sCorner = Instance.new("UICorner")
+            sCorner.CornerRadius = UDim.new(0, 4)
+            sCorner.Parent = subBtn
+
+            local sStroke = Instance.new("UIStroke")
+            sStroke.Color = Color3.fromRGB(32, 32, 38)
+            sStroke.Thickness = 1
+            sStroke.Parent = subBtn
+
+            local sLabel = Instance.new("TextLabel")
+            sLabel.Name = "Text"
+            sLabel.Size = UDim2.new(1, 0, 1, 0)
+            sLabel.BackgroundTransparency = 1
+            sLabel.Font = Library.Theme.FontBody
+            sLabel.TextSize = 11
+            sLabel.TextColor3 = Library.Theme.MutedText
+            sLabel.Text = subName
+            sLabel.Parent = subBtn
+
+            local subCols = Instance.new("Frame")
+            subCols.Name = "Columns_" .. subName
+            subCols.Size = UDim2.new(1, 0, 0, 0)
+            subCols.AutomaticSize = Enum.AutomaticSize.Y
+            subCols.BackgroundTransparency = 1
+            subCols.Visible = false
+            subCols.LayoutOrder = subIdx + 10
+            subCols.Parent = tabCanvasGroup
+
+            local sLeft = Instance.new("Frame")
+            sLeft.Name = "LeftCol"
+            sLeft.Size = UDim2.new(0.5, -6, 0, 0)
+            sLeft.Position = UDim2.new(0, 0, 0, 0)
+            sLeft.AutomaticSize = Enum.AutomaticSize.Y
+            sLeft.BackgroundTransparency = 1
+            sLeft.Parent = subCols
+
+            local sLeftLayout = Instance.new("UIListLayout")
+            sLeftLayout.FillDirection = Enum.FillDirection.Vertical
+            sLeftLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            sLeftLayout.Padding = UDim.new(0, 10)
+            sLeftLayout.Parent = sLeft
+
+            local sRight = Instance.new("Frame")
+            sRight.Name = "RightCol"
+            sRight.Size = UDim2.new(0.5, -6, 0, 0)
+            sRight.Position = UDim2.new(0.5, 6, 0, 0)
+            sRight.AutomaticSize = Enum.AutomaticSize.Y
+            sRight.BackgroundTransparency = 1
+            sRight.Parent = subCols
+
+            local sRightLayout = Instance.new("UIListLayout")
+            sRightLayout.FillDirection = Enum.FillDirection.Vertical
+            sRightLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            sRightLayout.Padding = UDim.new(0, 10)
+            sRightLayout.Parent = sRight
+
+            local subObj = {
+                Name = subName,
+                Button = subBtn,
+                Label = sLabel,
+                Stroke = sStroke,
+                Columns = subCols,
+                Left = sLeft,
+                Right = sRight,
+            }
+
+            local function setSubActive(active)
+                if active then
+                    subCols.Visible = true
+                    TweenService:Create(subBtn, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(24, 24, 30) }):Play()
+                    TweenService:Create(sStroke, TweenInfo.new(0.15), { Color = Library.Theme.Accent }):Play()
+                    TweenService:Create(sLabel, TweenInfo.new(0.15), { TextColor3 = Color3.fromRGB(255, 255, 255) }):Play()
+                else
+                    subCols.Visible = false
+                    TweenService:Create(subBtn, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(15, 15, 18) }):Play()
+                    TweenService:Create(sStroke, TweenInfo.new(0.15), { Color = Color3.fromRGB(32, 32, 38) }):Play()
+                    TweenService:Create(sLabel, TweenInfo.new(0.15), { TextColor3 = Library.Theme.MutedText }):Play()
+                end
+            end
+
+            subBtn.MouseButton1Click:Connect(function()
+                for _, s in ipairs(subtabs) do
+                    s.SetActive(s == subObj)
+                end
+                currentSubtab = subObj
+            end)
+
+            subBtn.MouseEnter:Connect(function()
+                if currentSubtab ~= subObj then
+                    TweenService:Create(sStroke, TweenInfo.new(0.12), { Color = Color3.fromRGB(60, 60, 72) }):Play()
+                end
+            end)
+
+            subBtn.MouseLeave:Connect(function()
+                if currentSubtab ~= subObj then
+                    TweenService:Create(sStroke, TweenInfo.new(0.12), { Color = Color3.fromRGB(32, 32, 38) }):Play()
+                end
+            end)
+
+            subObj.SetActive = setSubActive
+            table.insert(subtabs, subObj)
+
+            if #subtabs == 1 then
+                subObj.SetActive(true)
+                currentSubtab = subObj
+            else
+                subObj.SetActive(false)
+            end
+
+            function subObj:CreateGroupbox(title, colSide)
+                return Tab:_InternalCreateGroupbox(title, colSide, sLeft, sRight)
+            end
+
+            return subObj
+        end
 
         function Tab:CreateGroupbox(groupTitleText, columnSide)
+            return Tab:_InternalCreateGroupbox(groupTitleText, columnSide, leftCol, rightCol)
+        end
+
+        function Tab:_InternalCreateGroupbox(groupTitleText, columnSide, targetLeftCol, targetRightCol)
+            local parentCol = (columnSide == "Right") and (targetRightCol or rightCol) or (targetLeftCol or leftCol)
             groupboxCount = groupboxCount + 1
-            local parentCol = (columnSide == "Right") and rightCol or leftCol
+            local parentCol = (columnSide == "Right") and (targetRightCol or rightCol) or (targetLeftCol or leftCol)
 
             local groupbox = Instance.new("Frame")
             groupbox.Name = string.format("Group_%02d_%s", groupboxCount, groupTitleText)
@@ -2599,124 +2764,130 @@ task.spawn(function()
     end)
 end)
 
--- TAB 1: MAIN
+-- TAB 1: MAIN (AIMBOT & SILENT AIM)
 local MainTab = Window:CreateTab("Main")
 
-local AimbotGroup = MainTab:CreateGroupbox("Aimbot", "Left")
-local aimKeyHolder = nil
+local AimbotSub = MainTab:CreateSubtab("Aimbot")
+local SilentSub = MainTab:CreateSubtab("Silent Aim")
 
+-- Aimbot Subtab
+local AimbotGroup = AimbotSub:CreateGroupbox("Camera Aimbot", "Left")
 AimbotGroup:AddToggle("Enabled", Config.Aimbot.Enabled, {
+    Callback = function(v) Config.Aimbot.Enabled = v end,
     Keybind = Config.Aimbot.Key,
-    OnKeyChanged = function(k)
-        Config.Aimbot.Key = k
-        if aimKeyHolder then aimKeyHolder.SetKey(k) end
-    end,
-    Callback = function(v) Config.Aimbot.Enabled = v end
+    KeybindCallback = function(k) Config.Aimbot.Key = k end
 })
-aimKeyHolder = AimbotGroup:AddKeybind("Aim key", Config.Aimbot.Key, function(k)
-    Config.Aimbot.Key = k
-end)
+AimbotGroup:AddKeybind("Aim key", Config.Aimbot.Key, function(k) Config.Aimbot.Key = k end)
 AimbotGroup:AddDropdown("Aim mode", { "Camera", "Mouse" }, Config.Aimbot.Mode, function(v) Config.Aimbot.Mode = v end)
 AimbotGroup:AddDropdown("Aim part", { "Head", "Torso", "HumanoidRootPart" }, Config.Aimbot.Part, function(v) Config.Aimbot.Part = v end)
-AimbotGroup:AddSlider("Circle Size", 50, 500, Config.Aimbot.FOV, "", function(val)
-    Config.Aimbot.FOV = val
-    if FOVCircles.Aimbot then FOVCircles.Aimbot.Radius = val end
-end)
 AimbotGroup:AddSlider("Smoothing", 1, 100, Config.Aimbot.Smoothing, "", function(v) Config.Aimbot.Smoothing = v end)
 AimbotGroup:AddSlider("Mouse Sensitivity", 10, 400, Config.Aimbot.Sensitivity, "%", function(v) Config.Aimbot.Sensitivity = v end)
-AimbotGroup:AddToggle("Prediction", Config.Aimbot.Prediction, { Callback = function(v) Config.Aimbot.Prediction = v end })
-AimbotGroup:AddSlider("Prediction X", 0, 50, Config.Aimbot.PredictionX, "%", function(v) Config.Aimbot.PredictionX = v end)
-AimbotGroup:AddSlider("Prediction Y", 0, 50, Config.Aimbot.PredictionY, "%", function(v) Config.Aimbot.PredictionY = v end)
-AimbotGroup:AddToggle("Sticky Aim", Config.Aimbot.StickyAim, { Callback = function(v) Config.Aimbot.StickyAim = v end })
-AimbotGroup:AddSlider("Sticky Range", 100, 1000, Config.Aimbot.StickyRange, "", function(v) Config.Aimbot.StickyRange = v end)
-AimbotGroup:AddToggle("Show Circle", Config.Aimbot.ShowCircle, {
+
+local AimSettingsGroup = AimbotSub:CreateGroupbox("Targeting & FOV", "Right")
+AimSettingsGroup:AddToggle("Show Circle", Config.Aimbot.ShowCircle, {
     Callback = function(v)
         Config.Aimbot.ShowCircle = v
         if FOVCircles.Aimbot then FOVCircles.Aimbot.Visible = v end
     end
 })
-AimbotGroup:AddColorPicker("Circle Colour", Config.Aimbot.Color, function(col)
+AimSettingsGroup:AddSlider("Circle Size", 50, 500, Config.Aimbot.FOV, "", function(val)
+    Config.Aimbot.FOV = val
+    if FOVCircles.Aimbot then FOVCircles.Aimbot.Radius = val end
+end)
+AimSettingsGroup:AddColorPicker("Circle Colour", Config.Aimbot.Color, function(col)
     Config.Aimbot.Color = col
     if FOVCircles.Aimbot then FOVCircles.Aimbot.Color = col end
 end)
-AimbotGroup:AddSlider("Circle Y Offset", 0, 60, Config.Aimbot.Offset, "", function(v) Config.Aimbot.Offset = v end)
+AimSettingsGroup:AddSlider("Circle Y Offset", 0, 60, Config.Aimbot.Offset, "", function(v) Config.Aimbot.Offset = v end)
+AimSettingsGroup:AddToggle("Prediction", Config.Aimbot.Prediction, { Callback = function(v) Config.Aimbot.Prediction = v end })
+AimSettingsGroup:AddSlider("Prediction X", 0, 50, Config.Aimbot.PredictionX, "%", function(v) Config.Aimbot.PredictionX = v end)
+AimSettingsGroup:AddSlider("Prediction Y", 0, 50, Config.Aimbot.PredictionY, "%", function(v) Config.Aimbot.PredictionY = v end)
+AimSettingsGroup:AddToggle("Sticky Aim", Config.Aimbot.StickyAim, { Callback = function(v) Config.Aimbot.StickyAim = v end })
+AimSettingsGroup:AddSlider("Sticky Range", 100, 1000, Config.Aimbot.StickyRange, "", function(v) Config.Aimbot.StickyRange = v end)
+AimSettingsGroup:AddToggle("Wall Check", Config.Aimbot.WallCheck, { Callback = function(v) Config.Aimbot.WallCheck = v end })
+AimSettingsGroup:AddToggle("Prioritize Low Health", Config.Aimbot.LowHealth, { Callback = function(v) Config.Aimbot.LowHealth = v end })
 
-local ExtraAimbotGroup = MainTab:CreateGroupbox("Extra - Aimbot", "Left")
-ExtraAimbotGroup:AddToggle("Wall Check", Config.Aimbot.WallCheck, { Callback = function(v) Config.Aimbot.WallCheck = v end })
-ExtraAimbotGroup:AddToggle("Prioritize Low Health", Config.Aimbot.LowHealth, { Callback = function(v) Config.Aimbot.LowHealth = v end })
-
-local SilentGroup = MainTab:CreateGroupbox("Silent Aim", "Right")
-local silentKeyHolder = nil
-
+-- Silent Aim Subtab
+local SilentGroup = SilentSub:CreateGroupbox("Silent Aim", "Left")
 SilentGroup:AddToggle("Enabled", Config.SilentAim.Enabled, {
+    Callback = function(v) Config.SilentAim.Enabled = v end,
     Keybind = Config.SilentAim.Key,
-    OnKeyChanged = function(k)
-        Config.SilentAim.Key = k
-        if silentKeyHolder then silentKeyHolder.SetKey(k) end
-    end,
-    Callback = function(v) Config.SilentAim.Enabled = v end
+    KeybindCallback = function(k) Config.SilentAim.Key = k end
 })
-silentKeyHolder = SilentGroup:AddKeybind("Silent key", Config.SilentAim.Key, function(k)
-    Config.SilentAim.Key = k
-end)
-SilentGroup:AddSlider("Circle Size", 50, 600, Config.SilentAim.FOV, "", function(val)
-    Config.SilentAim.FOV = val
-    if FOVCircles.SilentAim then FOVCircles.SilentAim.Radius = val end
-end)
+SilentGroup:AddKeybind("Silent key", Config.SilentAim.Key, function(k) Config.SilentAim.Key = k end)
 SilentGroup:AddDropdown("Hit limb", { "HumanoidRootPart", "Head", "Torso" }, Config.SilentAim.Part, function(v) Config.SilentAim.Part = v end)
-SilentGroup:AddSlider("Hit Rate", 10, 100, Config.SilentAim.HitRate, "%", function(v) Config.SilentAim.HitRate = v end)
-SilentGroup:AddToggle("Sticky Aim", Config.SilentAim.StickyAim, { Callback = function(v) Config.SilentAim.StickyAim = v end })
-SilentGroup:AddSlider("Sticky Range", 100, 1000, Config.SilentAim.StickyRange, "", function(v) Config.SilentAim.StickyRange = v end)
-SilentGroup:AddToggle("Show Circle", Config.SilentAim.ShowCircle, {
+SilentGroup:AddSlider("Hit Rate", 1, 100, Config.SilentAim.HitRate, "%", function(v) Config.SilentAim.HitRate = v end)
+SilentGroup:AddToggle("Distance Limit", Config.SilentAim.DistanceLimit, { Callback = function(v) Config.SilentAim.DistanceLimit = v end })
+SilentGroup:AddSlider("Max Distance", 50, 500, Config.SilentAim.MaxDistance, " studs", function(v) Config.SilentAim.MaxDistance = v end)
+
+local SilentSettingsGroup = SilentSub:CreateGroupbox("Magic Bullets & Extras", "Right")
+SilentSettingsGroup:AddToggle("Magic Bullets (Ignore Walls/FOV)", Config.SilentAim.MagicBullets, {
+    Callback = function(v) Config.SilentAim.MagicBullets = v end
+})
+SilentSettingsGroup:AddToggle("Sticky Aim", Config.SilentAim.StickyAim, { Callback = function(v) Config.SilentAim.StickyAim = v end })
+SilentSettingsGroup:AddSlider("Sticky Range", 100, 1000, Config.SilentAim.StickyRange, "", function(v) Config.SilentAim.StickyRange = v end)
+SilentSettingsGroup:AddToggle("Show Circle", Config.SilentAim.ShowCircle, {
     Callback = function(v)
         Config.SilentAim.ShowCircle = v
         if FOVCircles.SilentAim then FOVCircles.SilentAim.Visible = v end
     end
 })
-SilentGroup:AddColorPicker("Circle Colour", Config.SilentAim.Color, function(col)
+SilentSettingsGroup:AddSlider("Circle Size", 50, 600, Config.SilentAim.FOV, "", function(val)
+    Config.SilentAim.FOV = val
+    if FOVCircles.SilentAim then FOVCircles.SilentAim.Radius = val end
+end)
+SilentSettingsGroup:AddColorPicker("Circle Colour", Config.SilentAim.Color, function(col)
     Config.SilentAim.Color = col
     if FOVCircles.SilentAim then FOVCircles.SilentAim.Color = col end
 end)
-SilentGroup:AddSlider("Circle Y Offset", 0, 60, Config.SilentAim.Offset, "", function(v) Config.SilentAim.Offset = v end)
+SilentSettingsGroup:AddToggle("Bullet Spread Reduction", Config.SilentAim.WallSpread, { Callback = function(v) Config.SilentAim.WallSpread = v end })
 
-local ExtraSilentGroup = MainTab:CreateGroupbox("Extra - SilentAim", "Right")
-ExtraSilentGroup:AddToggle("Disable When Carried", false)
-ExtraSilentGroup:AddToggle("Bullet Spread", Config.SilentAim.WallSpread, { Callback = function(v) Config.SilentAim.WallSpread = v end })
-ExtraSilentGroup:AddToggle("Distance Limit", Config.SilentAim.DistanceLimit, { Callback = function(v) Config.SilentAim.DistanceLimit = v end })
-ExtraSilentGroup:AddSlider("Max Distance", 50, 500, Config.SilentAim.MaxDistance, " studs", function(v) Config.SilentAim.MaxDistance = v end)
 
--- TAB 2: ESP
+-- TAB 2: ESP (VISUALS)
 local EspTab = Window:CreateTab("Esp")
 
-local PlayerEspGroup = EspTab:CreateGroupbox("Player & NPC ESP", "Left")
-PlayerEspGroup:AddToggle("Enabled", Config.Esp.Enabled, { Callback = function(v) Config.Esp.Enabled = v end })
-PlayerEspGroup:AddToggle("Show Real Players", Config.Esp.ShowPlayers, { Callback = function(v) Config.Esp.ShowPlayers = v end })
-PlayerEspGroup:AddToggle("Show AI Scavengers", Config.Esp.ShowNpcs, { Callback = function(v) Config.Esp.ShowNpcs = v end })
-PlayerEspGroup:AddToggle("Box ESP", Config.Esp.Boxes, { Callback = function(v) Config.Esp.Boxes = v end })
-PlayerEspGroup:AddToggle("Health Bar", Config.Esp.Health, { Callback = function(v) Config.Esp.Health = v end })
-PlayerEspGroup:AddToggle("Name Tags", Config.Esp.Names, { Callback = function(v) Config.Esp.Names = v end })
-PlayerEspGroup:AddToggle("Distance Tags", Config.Esp.Distances, { Callback = function(v) Config.Esp.Distances = v end })
-PlayerEspGroup:AddToggle("Snapline Tracers", Config.Esp.Tracers, { Callback = function(v) Config.Esp.Tracers = v end })
-PlayerEspGroup:AddToggle("Chams Highlight", Config.Visuals.Chams, { Callback = function(v) Config.Visuals.Chams = v end })
-PlayerEspGroup:AddDropdown("Tracer Origin", { "Bottom", "Center", "Mouse" }, Config.Esp.TracerOrigin, function(v) Config.Esp.TracerOrigin = v end)
+local PlayersSub = EspTab:CreateSubtab("Players")
+local WorldSub = EspTab:CreateSubtab("World & Loot")
 
-local EspConfigGroup = EspTab:CreateGroupbox("ESP Settings & Colors", "Right")
-EspConfigGroup:AddDropdown("ESP Engine", { "Auto (Dual Layer)", "Drawing (2D)", "Billboard (Native)" }, Config.Esp.Engine, function(v) Config.Esp.Engine = v end)
+-- Players Subtab
+local EspMainGroup = PlayersSub:CreateGroupbox("Player & NPC Visuals", "Left")
+EspMainGroup:AddToggle("Master Switch", Config.Esp.Enabled, {
+    Callback = function(enabled)
+        Config.Esp.Enabled = enabled
+        if not enabled then
+            for model, _ in pairs(DrawingEspPool) do cleanupModelEsp(model) end
+            for _, ent in pairs(ActiveEntities) do
+                local bb = ent.HRP:FindFirstChild("silent_bb_esp")
+                if bb then bb.Enabled = false end
+            end
+        end
+    end
+})
+EspMainGroup:AddToggle("Bounding Boxes", Config.Esp.Boxes, { Callback = function(v) Config.Esp.Boxes = v end })
+EspMainGroup:AddToggle("Health Bars", Config.Esp.Health, { Callback = function(v) Config.Esp.Health = v end })
+EspMainGroup:AddToggle("Name Tags", Config.Esp.Names, { Callback = function(v) Config.Esp.Names = v end })
+EspMainGroup:AddToggle("Distance Labels", Config.Esp.Distances, { Callback = function(v) Config.Esp.Distances = v end })
+EspMainGroup:AddToggle("Snapline Tracers", Config.Esp.Tracers, { Callback = function(v) Config.Esp.Tracers = v end })
+EspMainGroup:AddToggle("Head Tracking Dot", Config.Esp.HeadDot, { Callback = function(v) Config.Esp.HeadDot = v end })
+
+local EspConfigGroup = PlayersSub:CreateGroupbox("Colors & Filtering", "Right")
+EspConfigGroup:AddDropdown("Render Engine", { "Auto (Dual Layer)", "2D Drawing Engine", "3D Billboard Engine" }, Config.Esp.Engine, function(v) Config.Esp.Engine = v end)
+EspConfigGroup:AddToggle("Render Players", Config.Esp.ShowPlayers, { Callback = function(v) Config.Esp.ShowPlayers = v end })
+EspConfigGroup:AddToggle("Render NPCs / Scavs", Config.Esp.ShowNpcs, { Callback = function(v) Config.Esp.ShowNpcs = v end })
 EspConfigGroup:AddColorPicker("Player Box Color", Config.Esp.PlayerBoxColor, function(col) Config.Esp.PlayerBoxColor = col end)
-EspConfigGroup:AddColorPicker("AI / Scav Color", Config.Esp.NpcBoxColor, function(col) Config.Esp.NpcBoxColor = col end)
+EspConfigGroup:AddColorPicker("NPC Box Color", Config.Esp.NpcBoxColor, function(col) Config.Esp.NpcBoxColor = col end)
 EspConfigGroup:AddColorPicker("Tracer Color", Config.Esp.TracerColor, function(col) Config.Esp.TracerColor = col end)
+EspConfigGroup:AddDropdown("Tracer Origin", { "Bottom", "Center", "Top" }, Config.Esp.TracerOrigin, function(v) Config.Esp.TracerOrigin = v end)
 EspConfigGroup:AddSlider("Max Distance", 100, 3000, Config.Esp.MaxDistance, " studs", function(v) Config.Esp.MaxDistance = v end)
 
--- TAB 3: VISUALS
-local VisualsTab = Window:CreateTab("Visuals")
-
-local ChamsGroup = VisualsTab:CreateGroupbox("Chams & Shaders", "Left")
+-- World & Loot Subtab
+local ChamsGroup = WorldSub:CreateGroupbox("Chams & Shaders", "Left")
 ChamsGroup:AddToggle("Enable Chams", Config.Visuals.Chams, { Callback = function(v) Config.Visuals.Chams = v end })
 ChamsGroup:AddColorPicker("Visible Color", Config.Visuals.VisibleColor, function(col) Config.Visuals.VisibleColor = col end)
 ChamsGroup:AddColorPicker("Hidden Color", Config.Visuals.HiddenColor, function(col) Config.Visuals.HiddenColor = col end)
 ChamsGroup:AddSlider("Outline Transparency", 0, 100, Config.Visuals.Transparency, "%", function(v) Config.Visuals.Transparency = v end)
 
-local WorldGroup = VisualsTab:CreateGroupbox("World Loot ESP", "Right")
+local WorldGroup = WorldSub:CreateGroupbox("World Loot ESP", "Right")
 WorldGroup:AddToggle("Enable Loot ESP", Config.Loot.Enabled, {
     Callback = function(v)
         Config.Loot.Enabled = v
@@ -2729,14 +2900,17 @@ WorldGroup:AddSlider("Loot Max Distance", 50, 800, Config.Loot.MaxDistance, " st
 WorldGroup:AddColorPicker("Item Color", Config.Loot.ItemColor, function(col) Config.Loot.ItemColor = col end)
 WorldGroup:AddColorPicker("Crate / Safe Color", Config.Loot.ContainerColor, function(col) Config.Loot.ContainerColor = col end)
 
--- TAB 4: CHARACTER
+
+-- TAB 3: CHARACTER (ALL MOVEMENT FEATURES)
 local CharTab = Window:CreateTab("Character")
 
-local MovementGroup = CharTab:CreateGroupbox("Movement", "Left")
-MovementGroup:AddLabel("[!] NOTE: Movement speed >20.4 studs/s & high fly risk server rubberbands.")
-MovementGroup:AddToggle("Anti-Fall Damage (Safe Land)", Config.Character.AntiFallDamage, { Callback = function(v) Config.Character.AntiFallDamage = v end })
-MovementGroup:AddToggle("NoClip (Walk Through Walls)", Config.Character.NoClip, { Callback = function(v) Config.Character.NoClip = v end })
-MovementGroup:AddToggle("WalkSpeed Override", Config.Character.SpeedOverride, {
+local LocomotionSub = CharTab:CreateSubtab("Locomotion")
+local FlightClimbSub = CharTab:CreateSubtab("Flight & Climb")
+
+-- Locomotion Subtab
+local GroundGroup = LocomotionSub:CreateGroupbox("Ground Locomotion", "Left")
+GroundGroup:AddLabel("[!] Speed >20.4 studs/s risks server rubberbanding.")
+GroundGroup:AddToggle("WalkSpeed Override", Config.Character.SpeedOverride, {
     Callback = function(enabled)
         Config.Character.SpeedOverride = enabled
         if not enabled and LocalPlayer and LocalPlayer.Character then
@@ -2745,12 +2919,35 @@ MovementGroup:AddToggle("WalkSpeed Override", Config.Character.SpeedOverride, {
         end
     end
 })
-MovementGroup:AddSlider("Safe Speed (Cap: 20.4)", 14, 21, Config.Character.SpeedValue, " studs", function(val)
+GroundGroup:AddSlider("Target Speed (Cap: 20.4)", 14, 21, Config.Character.SpeedValue, " studs", function(val)
     Config.Character.SpeedValue = val
 end)
-MovementGroup:AddToggle("No Action Slowdown (ADS/Heal)", Config.Character.NoSlowdown, { Callback = function(v) Config.Character.NoSlowdown = v end })
-MovementGroup:AddToggle("Infinite Stamina", Config.Character.InfiniteStamina, { Callback = function(v) Config.Character.InfiniteStamina = v end })
-MovementGroup:AddToggle("Directional Fly", Config.Character.Fly, {
+GroundGroup:AddToggle("Native Controller Speed Accelerator", Config.Character.NativeSpeedBoost, {
+    Callback = function(v)
+        Config.Character.NativeSpeedBoost = v
+        Config.Misc.NativeSpeedBoost = v
+    end
+})
+GroundGroup:AddToggle("Zero Weight (Overweight Immunity)", Config.Character.ZeroWeight, {
+    Callback = function(v)
+        Config.Character.ZeroWeight = v
+        Config.Misc.ZeroWeight = v
+    end
+})
+
+local AgilityGroup = LocomotionSub:CreateGroupbox("Agility & Movement States", "Right")
+AgilityGroup:AddToggle("Bunny Hop Engine", Config.Character.BunnyHop, { Callback = function(v) Config.Character.BunnyHop = v end })
+AgilityGroup:AddToggle("NoClip (Walk Through Walls)", Config.Character.NoClip, { Callback = function(v) Config.Character.NoClip = v end })
+AgilityGroup:AddToggle("No Action Slowdown (ADS/Heal)", Config.Character.NoSlowdown, {
+    Callback = function(v)
+        Config.Character.NoSlowdown = v
+        Config.Misc.NoSlowdown = v
+    end
+})
+
+-- Flight & Climb Subtab
+local FlyGroup = FlightClimbSub:CreateGroupbox("Directional Flight", "Left")
+FlyGroup:AddToggle("Directional Fly", Config.Character.Fly, {
     Callback = function(v)
         Config.Character.Fly = v
         if not v and LocalPlayer and LocalPlayer.Character then
@@ -2761,111 +2958,104 @@ MovementGroup:AddToggle("Directional Fly", Config.Character.Fly, {
         end
     end
 })
-MovementGroup:AddDropdown("Flight Mode", { "Hover Glide (Anti-Snapback)", "Wave Hop (Wall Climber)", "Uncapped Free Flight" }, Config.Character.FlightMode, function(v)
+FlyGroup:AddDropdown("Flight Mode", { "Hover Glide (Anti-Snapback)", "Uncapped Free Flight" }, Config.Character.FlightMode == "Wave Hop (Wall Climber)" and "Hover Glide (Anti-Snapback)" or Config.Character.FlightMode, function(v)
     Config.Character.FlightMode = v
 end)
-MovementGroup:AddSlider("Fly Speed", 5, 21, Config.Character.FlySpeed, " studs", function(v)
+FlyGroup:AddSlider("Fly Speed", 5, 21, Config.Character.FlySpeed, " studs", function(v)
     Config.Character.FlySpeed = v
 end)
-MovementGroup:AddToggle("Bunny Hop", Config.Character.BunnyHop, { Callback = function(v) Config.Character.BunnyHop = v end })
-MovementGroup:AddToggle("Wall Climb (Spider)", Config.Character.WallClimb, {
+
+local ClimbGroup = FlightClimbSub:CreateGroupbox("Wall Climb & Air", "Right")
+ClimbGroup:AddToggle("Wall Climb (Spider)", Config.Character.WallClimb, {
     Callback = function(v)
         Config.Character.WallClimb = v
         Config.Misc.WallClimb = v
     end
 })
-MovementGroup:AddSlider("Climb Speed", 8, 20, Config.Character.WallClimbSpeed, " studs", function(v)
+ClimbGroup:AddSlider("Climb Speed", 8, 20, Config.Character.WallClimbSpeed, " studs", function(v)
     Config.Character.WallClimbSpeed = v
 end)
-MovementGroup:AddToggle("Zero Weight (Overweight Immunity)", Config.Character.ZeroWeight, {
+ClimbGroup:AddToggle("Anti-Fall Damage (Safe Land)", Config.Character.AntiFallDamage, {
     Callback = function(v)
-        Config.Character.ZeroWeight = v
-        Config.Misc.ZeroWeight = v
-    end
-})
-MovementGroup:AddToggle("Native Controller Speed Boost", Config.Character.NativeSpeedBoost, {
-    Callback = function(v)
-        Config.Character.NativeSpeedBoost = v
-        Config.Misc.NativeSpeedBoost = v
+        Config.Character.AntiFallDamage = v
+        Config.Misc.AntiFallDamage = v
     end
 })
 
-local WeaponGroup = CharTab:CreateGroupbox("Weapon Handling", "Right")
-WeaponGroup:AddToggle("Fast Tactical Reload", Config.Character.FastReload, { Callback = function(v) Config.Character.FastReload = v end })
-WeaponGroup:AddToggle("Recoil Neutralizer", Config.Character.NoRecoil, { Callback = function(v) Config.Character.NoRecoil = v end })
-WeaponGroup:AddToggle("Spread Reduction", Config.Character.NoSpread, { Callback = function(v) Config.Character.NoSpread = v end })
 
--- TAB 5: MISC
+-- TAB 4: MISC (WEAPONS, COMBAT & SURVIVAL EXPLOITS)
 local MiscTab = Window:CreateTab("Misc")
 
-local MiscCombatGroup = MiscTab:CreateGroupbox("Combat & Weapon Handling", "Left")
-MiscCombatGroup:AddToggle("Recoil Neutralizer", Config.Misc.NoRecoil, {
+local WeaponsSub = MiscTab:CreateSubtab("Weapons & Handling")
+local SurvivalSub = MiscTab:CreateSubtab("Survival & Engine")
+
+-- Weapons Subtab
+local WeaponHandlingGroup = WeaponsSub:CreateGroupbox("Recoil & Handling", "Left")
+WeaponHandlingGroup:AddToggle("Recoil Neutralizer", Config.Misc.NoRecoil, {
     Callback = function(v)
         Config.Misc.NoRecoil = v
         Config.Character.NoRecoil = v
     end
 })
-MiscCombatGroup:AddToggle("Max Weapon Ergonomics", Config.Misc.MaxErgonomics, {
+WeaponHandlingGroup:AddToggle("Max Weapon Ergonomics", Config.Misc.MaxErgonomics, {
     Callback = function(v)
         Config.Misc.MaxErgonomics = v
     end
 })
-MiscCombatGroup:AddToggle("Tactical Fast Reload", Config.Misc.FastReload, {
+WeaponHandlingGroup:AddToggle("Tactical Fast Reload", Config.Misc.FastReload, {
     Callback = function(v)
         Config.Misc.FastReload = v
         Config.Character.FastReload = v
     end
 })
-MiscCombatGroup:AddToggle("Instant ADS Speed", Config.Misc.InstantADS, {
+WeaponHandlingGroup:AddToggle("Spread Reduction", Config.Character.NoSpread, {
+    Callback = function(v)
+        Config.Character.NoSpread = v
+    end
+})
+
+local WeaponMechanicsGroup = WeaponsSub:CreateGroupbox("Aim & Optics", "Right")
+WeaponMechanicsGroup:AddToggle("Instant ADS Speed", Config.Misc.InstantADS, {
     Callback = function(v)
         Config.Misc.InstantADS = v
     end
 })
-MiscCombatGroup:AddToggle("Disable Weapon Bobbing", Config.Misc.NoBobbing, {
+WeaponMechanicsGroup:AddToggle("Disable Weapon Bobbing", Config.Misc.NoBobbing, {
     Callback = function(v)
         Config.Misc.NoBobbing = v
     end
 })
 
-local MiscEngineGroup = MiscTab:CreateGroupbox("Engine & Survival", "Right")
-MiscEngineGroup:AddToggle("Zero Stamina Drain", Config.Misc.InfiniteStamina, {
+-- Survival & Engine Subtab
+local SurvivalGroup = SurvivalSub:CreateGroupbox("Survival & Health", "Left")
+SurvivalGroup:AddToggle("Zero Stamina Drain", Config.Misc.InfiniteStamina, {
     Callback = function(v)
         Config.Misc.InfiniteStamina = v
         Config.Character.InfiniteStamina = v
     end
 })
-MiscEngineGroup:AddToggle("Zero Fall Damage", Config.Misc.AntiFallDamage, {
+SurvivalGroup:AddToggle("Zero Fall Damage", Config.Misc.AntiFallDamage, {
     Callback = function(v)
         Config.Misc.AntiFallDamage = v
         Config.Character.AntiFallDamage = v
     end
 })
-MiscEngineGroup:AddToggle("No Action Slowdown", Config.Misc.NoSlowdown, {
+SurvivalGroup:AddToggle("No Action Slowdown", Config.Misc.NoSlowdown, {
     Callback = function(v)
         Config.Misc.NoSlowdown = v
         Config.Character.NoSlowdown = v
     end
 })
-MiscEngineGroup:AddToggle("Wall Climb (Spider)", Config.Misc.WallClimb, {
+
+local CombatExploitsGroup = SurvivalSub:CreateGroupbox("Combat Exploits", "Right")
+CombatExploitsGroup:AddToggle("Magic Bullets (Direct Hit Redirection)", Config.SilentAim.MagicBullets, {
     Callback = function(v)
-        Config.Misc.WallClimb = v
-        Config.Character.WallClimb = v
-    end
-})
-MiscEngineGroup:AddToggle("Zero Weight (Overweight Immunity)", Config.Misc.ZeroWeight, {
-    Callback = function(v)
-        Config.Misc.ZeroWeight = v
-        Config.Character.ZeroWeight = v
-    end
-})
-MiscEngineGroup:AddToggle("Native Controller Speed Boost", Config.Misc.NativeSpeedBoost, {
-    Callback = function(v)
-        Config.Misc.NativeSpeedBoost = v
-        Config.Character.NativeSpeedBoost = v
+        Config.SilentAim.MagicBullets = v
     end
 })
 
--- TAB 6: SETTINGS
+
+-- TAB 5: SETTINGS
 local SettingsTab = Window:CreateTab("Settings")
 
 local ProfileGroup = SettingsTab:CreateGroupbox("Profile Manager", "Left")
@@ -2891,6 +3081,32 @@ end)
 -- =========================================================================
 
 local function findBestTarget(fovRadius, boneName, wallCheck, maxDist)
+    -- Magic Bullets: Bypasses FOV cone and wall raycast obstructions completely
+    if Config.SilentAim.MagicBullets then
+        local closestEnt = nil
+        local closestDist = maxDist or 1500
+        for model, ent in pairs(ActiveEntities) do
+            local hrp = ent.HRP
+            local bone = getTargetBone(model, boneName)
+            if hrp and bone and model.Parent then
+                local d = (bone.Position - Camera.CFrame.Position).Magnitude
+                if d <= closestDist then
+                    closestDist = d
+                    closestEnt = {
+                        Entity = ent,
+                        Model = model,
+                        Bone = bone,
+                        ScreenPos = Vector2.new(0, 0),
+                        Distance = d,
+                    }
+                end
+            end
+        end
+        if closestEnt then
+            return closestEnt
+        end
+    end
+
     local mousePos = UserInputService:GetMouseLocation()
     local bestTarget = nil
     local minMouseDist = fovRadius
