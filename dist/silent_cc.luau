@@ -158,6 +158,8 @@ local Config = {
         BunnyHop = false,
         WallClimb = false,
         WallClimbSpeed = 16,
+        ZeroWeight = true,
+        NativeSpeedBoost = true,
         FastReload = false,
         NoRecoil = false,
         NoSpread = false,
@@ -172,6 +174,8 @@ local Config = {
         AntiFallDamage = true,
         NoSlowdown = true,
         WallClimb = false,
+        ZeroWeight = true,
+        NativeSpeedBoost = true,
     }
 }
 
@@ -2773,6 +2777,18 @@ MovementGroup:AddToggle("Wall Climb (Spider)", Config.Character.WallClimb, {
 MovementGroup:AddSlider("Climb Speed", 8, 20, Config.Character.WallClimbSpeed, " studs", function(v)
     Config.Character.WallClimbSpeed = v
 end)
+MovementGroup:AddToggle("Zero Weight (Overweight Immunity)", Config.Character.ZeroWeight, {
+    Callback = function(v)
+        Config.Character.ZeroWeight = v
+        Config.Misc.ZeroWeight = v
+    end
+})
+MovementGroup:AddToggle("Native Controller Speed Boost", Config.Character.NativeSpeedBoost, {
+    Callback = function(v)
+        Config.Character.NativeSpeedBoost = v
+        Config.Misc.NativeSpeedBoost = v
+    end
+})
 
 local WeaponGroup = CharTab:CreateGroupbox("Weapon Handling", "Right")
 WeaponGroup:AddToggle("Fast Tactical Reload", Config.Character.FastReload, { Callback = function(v) Config.Character.FastReload = v end })
@@ -2834,6 +2850,18 @@ MiscEngineGroup:AddToggle("Wall Climb (Spider)", Config.Misc.WallClimb, {
     Callback = function(v)
         Config.Misc.WallClimb = v
         Config.Character.WallClimb = v
+    end
+})
+MiscEngineGroup:AddToggle("Zero Weight (Overweight Immunity)", Config.Misc.ZeroWeight, {
+    Callback = function(v)
+        Config.Misc.ZeroWeight = v
+        Config.Character.ZeroWeight = v
+    end
+})
+MiscEngineGroup:AddToggle("Native Controller Speed Boost", Config.Misc.NativeSpeedBoost, {
+    Callback = function(v)
+        Config.Misc.NativeSpeedBoost = v
+        Config.Character.NativeSpeedBoost = v
     end
 })
 
@@ -3539,6 +3567,23 @@ task.spawn(function()
                         end
                         if Config.Misc.NoBobbing and typeof(env.bobbing) == "function" then
                             env.bobbing = function(...) return CFrame.identity end
+                        end
+                        -- Overweight & Loot Weight Nullification
+                        if (Config.Character.ZeroWeight or Config.Misc.ZeroWeight) then
+                            if typeof(env.applyWeightPenalty) == "function" then
+                                env.applyWeightPenalty = function(...) return end
+                            end
+                            if typeof(env.updateOverweightState) == "function" then
+                                env.updateOverweightState = function(...) return end
+                            end
+                            if typeof(env.handleCharacterWeight) == "function" then
+                                env.handleCharacterWeight = function(...) return end
+                            end
+                        end
+                        -- Native Controller Speed Injector
+                        if (Config.Character.NativeSpeedBoost or Config.Misc.NativeSpeedBoost) and typeof(env.getExtraSpeed) == "function" then
+                            local extra = math.clamp(Config.Character.SpeedValue - 16, 0, 4.4)
+                            env.getExtraSpeed = function(...) return extra end
                         end
                     end
                 end
