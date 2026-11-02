@@ -107,7 +107,9 @@ local Config = {
         WallSpread = false,
         DistanceLimit = false,
         MaxDistance = 150,
-        MagicBullets = false,
+        Wallbang = false,
+        WallbangHitRate = 100,
+        WallbangDistance = 600,
     },
     Esp = {
         Enabled = false,
@@ -402,9 +404,10 @@ if typeof(hookmeta) == "function" then
                 return
             end
 
-            -- 3. hitPos Redirection (Silent Aim Bullet Impact)
-            if Config.SilentAim.Enabled and currentSilentTargetBone and (method == "FireServer" or method == "fireServer") and tostring(self.Name) == "hitPos" then
-                if math.random(1, 100) <= Config.SilentAim.HitRate then
+            -- 3. hitPos Redirection (Silent Aim & Wallbang Penetration)
+            if (Config.SilentAim.Enabled or Config.SilentAim.Wallbang) and currentSilentTargetBone and (method == "FireServer" or method == "fireServer") and tostring(self.Name) == "hitPos" then
+                local hitChance = Config.SilentAim.Wallbang and (Config.SilentAim.WallbangHitRate or 100) or Config.SilentAim.HitRate
+                if math.random(1, 100) <= hitChance then
                     if typeof(args[2]) == "Vector3" then
                         args[2] = currentSilentTargetBone.Position
                         args[1] = currentSilentTargetBone
@@ -413,15 +416,18 @@ if typeof(hookmeta) == "function" then
                 end
             end
 
-            -- 4. Raycast Redirection (SwiftCast & Gun Physics)
+            -- 4. Raycast Redirection (Penetrates Map Walls towards Target)
             if (method == "Raycast" or method == "raycast") and self == Workspace then
-                if Config.SilentAim.Enabled and currentSilentTargetBone and math.random(1, 100) <= Config.SilentAim.HitRate then
-                    local origin = args[1]
-                    local direction = args[2]
-                    if typeof(origin) == "Vector3" and typeof(direction) == "Vector3" then
-                        local targetPos = currentSilentTargetBone.Position
-                        args[2] = (targetPos - origin).Unit * direction.Magnitude
-                        return oldNamecall(self, unpack(args))
+                if (Config.SilentAim.Enabled or Config.SilentAim.Wallbang) and currentSilentTargetBone then
+                    local hitChance = Config.SilentAim.Wallbang and (Config.SilentAim.WallbangHitRate or 100) or Config.SilentAim.HitRate
+                    if math.random(1, 100) <= hitChance then
+                        local origin = args[1]
+                        local direction = args[2]
+                        if typeof(origin) == "Vector3" and typeof(direction) == "Vector3" then
+                            local targetPos = currentSilentTargetBone.Position
+                            args[2] = (targetPos - origin).Unit * direction.Magnitude
+                            return oldNamecall(self, unpack(args))
+                        end
                     end
                 end
             end
@@ -435,11 +441,14 @@ if typeof(hookfn) == "function" and typeof(Workspace.Raycast) == "function" then
     pcall(function()
         local oldRaycast
         oldRaycast = hookfn(Workspace.Raycast, newccl(function(self, origin, direction, params)
-            if Config.SilentAim.Enabled and currentSilentTargetBone and math.random(1, 100) <= Config.SilentAim.HitRate then
-                if typeof(origin) == "Vector3" and typeof(direction) == "Vector3" then
-                    local targetPos = currentSilentTargetBone.Position
-                    local newDir = (targetPos - origin).Unit * direction.Magnitude
-                    return oldRaycast(self, origin, newDir, params)
+            if (Config.SilentAim.Enabled or Config.SilentAim.Wallbang) and currentSilentTargetBone then
+                local hitChance = Config.SilentAim.Wallbang and (Config.SilentAim.WallbangHitRate or 100) or Config.SilentAim.HitRate
+                if math.random(1, 100) <= hitChance then
+                    if typeof(origin) == "Vector3" and typeof(direction) == "Vector3" then
+                        local targetPos = currentSilentTargetBone.Position
+                        local newDir = (targetPos - origin).Unit * direction.Magnitude
+                        return oldRaycast(self, origin, newDir, params)
+                    end
                 end
             end
             return oldRaycast(self, origin, direction, params)
@@ -829,6 +838,31 @@ function Library.CreateWindow(config)
         tabLabel.Text = tabName
         tabLabel.Parent = tabBtn
 
+        -- Top-level container for this Tab (Houses fixed Top Nav Bar + Scrolling Content Area)
+        local tabContainer = Instance.new("Frame")
+        tabContainer.Name = "TabContainer_" .. tabName
+        tabContainer.Size = UDim2.new(1, 0, 1, 0)
+        tabContainer.Position = UDim2.new(0, 0, 0, 0)
+        tabContainer.BackgroundTransparency = 1
+        tabContainer.Visible = false
+        tabContainer.Parent = contentArea
+
+        -- Fixed Top Navigation Bar for Subtabs (Always visible at the top, never occluded by scrolling)
+        local subtabBar = Instance.new("Frame")
+        subtabBar.Name = "SubtabBar"
+        subtabBar.Size = UDim2.new(1, 0, 0, 28)
+        subtabBar.Position = UDim2.new(0, 0, 0, 0)
+        subtabBar.BackgroundTransparency = 1
+        subtabBar.Visible = false
+        subtabBar.ZIndex = 50
+        subtabBar.Parent = tabContainer
+
+        local subLayout = Instance.new("UIListLayout")
+        subLayout.FillDirection = Enum.FillDirection.Horizontal
+        subLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        subLayout.Padding = UDim.new(0, 6)
+        subLayout.Parent = subtabBar
+
         local tabContent = Instance.new("ScrollingFrame")
         tabContent.Name = "TabContent_" .. tabName
         tabContent.Size = UDim2.new(1, 0, 1, 0)
@@ -839,9 +873,8 @@ function Library.CreateWindow(config)
         tabContent.ScrollBarImageColor3 = Library.Theme.Accent
         tabContent.CanvasSize = UDim2.new(0, 0, 0, 0)
         tabContent.AutomaticCanvasSize = Enum.AutomaticSize.Y
-        tabContent.Visible = false
         tabContent.ClipsDescendants = true
-        tabContent.Parent = contentArea
+        tabContent.Parent = tabContainer
 
         local tabCanvasGroup = Instance.new("CanvasGroup")
         tabCanvasGroup.Name = "TabCanvasGroup"
@@ -894,7 +927,8 @@ function Library.CreateWindow(config)
             Label = tabLabel,
             GlowBar = tabGlowBar,
             Stroke = tabStroke,
-            Content = tabContent,
+            Content = tabContainer,
+            Scroll = tabContent,
             Canvas = tabCanvasGroup,
             Left = leftCol,
             Right = rightCol,
@@ -1018,37 +1052,25 @@ function Library.CreateWindow(config)
 
         local Tab = {}
         local groupboxCount = 0
-        local subtabBar = nil
+        local hasSubtabs = false
         local subtabs = {}
         local currentSubtab = nil
 
         function Tab:CreateSubtab(subName)
-            if not subtabBar then
+            if not hasSubtabs then
+                hasSubtabs = true
                 columns.Visible = false
-
-                subtabBar = Instance.new("Frame")
-                subtabBar.Name = "SubtabBar"
-                subtabBar.Size = UDim2.new(1, 0, 0, 32)
-                subtabBar.BackgroundTransparency = 1
-                subtabBar.LayoutOrder = 0
-                subtabBar.Parent = tabCanvasGroup
-
-                local subPad = Instance.new("UIPadding")
-                subPad.PaddingBottom = UDim.new(0, 6)
-                subPad.Parent = subtabBar
-
-                local subLayout = Instance.new("UIListLayout")
-                subLayout.FillDirection = Enum.FillDirection.Horizontal
-                subLayout.SortOrder = Enum.SortOrder.LayoutOrder
-                subLayout.Padding = UDim.new(0, 6)
-                subLayout.Parent = subtabBar
+                subtabBar.Visible = true
+                -- Offset the scrolling pane below the fixed top navbar
+                tabContent.Position = UDim2.new(0, 0, 0, 36)
+                tabContent.Size = UDim2.new(1, 0, 1, -36)
             end
 
             local subIdx = #subtabs + 1
 
             local subBtn = Instance.new("TextButton")
             subBtn.Name = string.format("SubTab_%02d_%s", subIdx, subName)
-            subBtn.Size = UDim2.new(0, 0, 1, -4)
+            subBtn.Size = UDim2.new(0, 0, 1, 0)
             subBtn.AutomaticSize = Enum.AutomaticSize.X
             subBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
             subBtn.BorderSizePixel = 0
@@ -2820,10 +2842,16 @@ SilentGroup:AddSlider("Hit Rate", 1, 100, Config.SilentAim.HitRate, "%", functio
 SilentGroup:AddToggle("Distance Limit", Config.SilentAim.DistanceLimit, { Callback = function(v) Config.SilentAim.DistanceLimit = v end })
 SilentGroup:AddSlider("Max Distance", 50, 500, Config.SilentAim.MaxDistance, " studs", function(v) Config.SilentAim.MaxDistance = v end)
 
-local SilentSettingsGroup = SilentSub:CreateGroupbox("Magic Bullets & Extras", "Right")
-SilentSettingsGroup:AddToggle("Magic Bullets (Ignore Walls/FOV)", Config.SilentAim.MagicBullets, {
-    Callback = function(v) Config.SilentAim.MagicBullets = v end
+local SilentSettingsGroup = SilentSub:CreateGroupbox("Wallbang & Bullet Redirection", "Right")
+SilentSettingsGroup:AddToggle("Wallbang (Shoot Through Walls)", Config.SilentAim.Wallbang, {
+    Callback = function(v) Config.SilentAim.Wallbang = v end
 })
+SilentSettingsGroup:AddSlider("Wallbang Hit Rate", 1, 100, Config.SilentAim.WallbangHitRate, "%", function(v)
+    Config.SilentAim.WallbangHitRate = v
+end)
+SilentSettingsGroup:AddSlider("Wallbang Max Distance", 50, 1000, Config.SilentAim.WallbangDistance, " studs", function(v)
+    Config.SilentAim.WallbangDistance = v
+end)
 SilentSettingsGroup:AddToggle("Sticky Aim", Config.SilentAim.StickyAim, { Callback = function(v) Config.SilentAim.StickyAim = v end })
 SilentSettingsGroup:AddSlider("Sticky Range", 100, 1000, Config.SilentAim.StickyRange, "", function(v) Config.SilentAim.StickyRange = v end)
 SilentSettingsGroup:AddToggle("Show Circle", Config.SilentAim.ShowCircle, {
@@ -3048,9 +3076,9 @@ SurvivalGroup:AddToggle("No Action Slowdown", Config.Misc.NoSlowdown, {
 })
 
 local CombatExploitsGroup = SurvivalSub:CreateGroupbox("Combat Exploits", "Right")
-CombatExploitsGroup:AddToggle("Magic Bullets (Direct Hit Redirection)", Config.SilentAim.MagicBullets, {
+CombatExploitsGroup:AddToggle("Wallbang (Shoot Through Walls)", Config.SilentAim.Wallbang, {
     Callback = function(v)
-        Config.SilentAim.MagicBullets = v
+        Config.SilentAim.Wallbang = v
     end
 })
 
@@ -3081,17 +3109,17 @@ end)
 -- =========================================================================
 
 local function findBestTarget(fovRadius, boneName, wallCheck, maxDist)
-    -- Magic Bullets: Bypasses FOV cone and wall raycast obstructions completely
-    if Config.SilentAim.MagicBullets then
+    -- Wallbang Engine: Detects and locks targets through all world geometry
+    if Config.SilentAim.Wallbang then
         local closestEnt = nil
-        local closestDist = maxDist or 1500
+        local maxRange = Config.SilentAim.WallbangDistance or 600
         for model, ent in pairs(ActiveEntities) do
             local hrp = ent.HRP
             local bone = getTargetBone(model, boneName)
             if hrp and bone and model.Parent then
                 local d = (bone.Position - Camera.CFrame.Position).Magnitude
-                if d <= closestDist then
-                    closestDist = d
+                if d <= maxRange then
+                    maxRange = d
                     closestEnt = {
                         Entity = ent,
                         Model = model,
