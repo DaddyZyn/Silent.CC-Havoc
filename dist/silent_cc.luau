@@ -529,6 +529,7 @@ function Library.CreateWindow(config)
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "silent_cc_" .. tostring(math.random(100000, 999999))
     screenGui.ResetOnSpawn = false
+    screenGui.IgnoreGuiInset = true
     screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     screenGui.DisplayOrder = 999999
     screenGui.Parent = getSafeParent()
@@ -1550,10 +1551,10 @@ function Library.CreateWindow(config)
                 -- Floating Overlay Options Menu (Parented to popupOverlay to avoid scroll clipping)
                 local popMenu = Instance.new("Frame")
                 popMenu.Name = "DropPopup_" .. label
-                popMenu.BackgroundColor3 = Color3.fromRGB(14, 14, 18)
+                popMenu.BackgroundColor3 = Color3.fromRGB(13, 13, 16)
                 popMenu.BorderSizePixel = 0
                 popMenu.Visible = false
-                popMenu.ZIndex = 9500
+                popMenu.ZIndex = 10000
                 popMenu.Parent = Window.PopupOverlay
 
                 local popCorner = Instance.new("UICorner")
@@ -1600,9 +1601,13 @@ function Library.CreateWindow(config)
                 local function updatePopupPosition()
                     local absPos = dropBtn.AbsolutePosition
                     local absSize = dropBtn.AbsoluteSize
-                    popMenu.Position = UDim2.new(0, absPos.X, 0, absPos.Y + absSize.Y + 3)
-                    popMenu.Size = UDim2.new(0, absSize.X, 0, math.clamp(#currentItems * 26 + 6, 26, 160))
+                    popMenu.Position = UDim2.new(0, absPos.X, 0, absPos.Y + absSize.Y + 2)
+                    popMenu.Size = UDim2.new(0, absSize.X, 0, math.clamp(#currentItems * 26 + 6, 26, 180))
                 end
+
+                dropBtn:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
+                    if isOpen then updatePopupPosition() end
+                end)
 
                 local function populateOptions()
                     for _, c in ipairs(scrollList:GetChildren()) do
@@ -3374,28 +3379,70 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- CharacterController Stamina Memory Patch Loop
+-- =========================================================================
+-- SECTION 11: HAVOC ENGINE MEMORY PATCHER (REALISM, STAMINA & BASECAMERA)
+-- =========================================================================
 task.spawn(function()
+    local getgc_fn = getgc or (getgenv and getgenv().getgc)
     while true do
         task.wait(0.5)
-        if Config.Character.InfiniteStamina and LocalPlayer and LocalPlayer.Character then
-            pcall(function()
-                local scripts = LocalPlayer.Character:FindFirstChild("Scripts")
-                local cc = scripts and scripts:FindFirstChild("CharacterController")
-                local getsenv_fn = getsenv or (getgenv and getgenv().getsenv)
-                if cc and typeof(getsenv_fn) == "function" then
-                    local env = getsenv_fn(cc)
-                    for k, v in pairs(env) do
-                        local lower = string.lower(tostring(k))
-                        if string.find(lower, "stamina") or string.find(lower, "energy") then
-                            if typeof(v) == "number" then
-                                env[k] = 100
+        pcall(function()
+            if typeof(getgc_fn) == "function" then
+                for _, obj in ipairs(getgc_fn(true)) do
+                    if type(obj) == "table" then
+                        -- Realism Table: recoilReductionRatio & fallDamage
+                        if rawget(obj, "recoilReductionRatio") ~= nil and rawget(obj, "fallDamage") ~= nil then
+                            if Config.Character.NoRecoil then
+                                rawset(obj, "recoilReductionRatio", 0)
+                            end
+                            if Config.Character.AntiFallDamage then
+                                rawset(obj, "fallDamage", 0)
+                            end
+                        end
+
+                        -- Stamina Table: drainRate & regenRate
+                        if rawget(obj, "drainRate") ~= nil and rawget(obj, "regenRate") ~= nil then
+                            if Config.Character.InfiniteStamina then
+                                rawset(obj, "drainRate", 0)
+                                rawset(obj, "regenRate", 100)
                             end
                         end
                     end
                 end
-            end)
-        end
+            end
+        end)
+
+        -- Scripts.Client getMagErgonomics hook
+        pcall(function()
+            if Config.Character.FastReload and LocalPlayer and LocalPlayer.Character then
+                local scripts = LocalPlayer.Character:FindFirstChild("Scripts")
+                local clientScript = scripts and scripts:FindFirstChild("Client")
+                local getsenv_fn = getsenv or (getgenv and getgenv().getsenv)
+                if clientScript and typeof(getsenv_fn) == "function" then
+                    local env = getsenv_fn(clientScript)
+                    if env and typeof(env.getMagErgonomics) == "function" then
+                        env.getMagErgonomics = function(...) return 100 end
+                    end
+                end
+            end
+        end)
+    end
+end)
+
+-- BaseCamera _recoilCF Nullification on RenderStepped
+RunService.RenderStepped:Connect(function()
+    if Config.Character.NoRecoil and LocalPlayer and LocalPlayer.Character then
+        pcall(function()
+            local scripts = LocalPlayer.Character:FindFirstChild("Scripts")
+            local camScript = scripts and scripts:FindFirstChild("Camera")
+            local baseCam = camScript and camScript:FindFirstChild("BaseCamera")
+            if baseCam and baseCam:IsA("ModuleScript") then
+                local ok, camMod = pcall(require, baseCam)
+                if ok and type(camMod) == "table" and camMod._recoilCF then
+                    camMod._recoilCF = CFrame.identity
+                end
+            end
+        end)
     end
 end)
 
