@@ -438,17 +438,16 @@ function Library.CreateWindow(config)
     userAvatar.Position = UDim2.new(0, 7, 0.5, -16)
     userAvatar.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
     userAvatar.BorderSizePixel = 0
-    userAvatar.Image = "rbxasset://textures/ui/GuiImagePlaceholder.png"
-    pcall(function()
-        if LocalPlayer then
-            local thumb, ready = pcall(function()
-                return Players:GetUserThumbnailAsync(LocalPlayer.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size48x48)
-            end)
-            if thumb and ready then
-                userAvatar.Image = ready
-            else
-                userAvatar.Image = string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=48&h=48", LocalPlayer.UserId)
-            end
+    userAvatar.ScaleType = Enum.ScaleType.Crop
+    userAvatar.ZIndex = 5
+    userAvatar.Image = LocalPlayer and string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150", LocalPlayer.UserId) or ""
+    task.spawn(function()
+        if not LocalPlayer then return end
+        local ok, content = pcall(function()
+            return (Players:GetUserThumbnailAsync(LocalPlayer.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size150x150))
+        end)
+        if ok and content and userAvatar.Parent then
+            userAvatar.Image = content
         end
     end)
     userAvatar.Parent = profileCard
@@ -1587,7 +1586,7 @@ function Library.CreateWindow(config)
                 fill.Name = "Fill"
                 local alpha = (currentVal - min) / (max - min)
                 fill.Size = UDim2.new(alpha, 0, 1, 0)
-                fill.BackgroundColor3 = Color3.fromRGB(235, 235, 240)
+                fill.BackgroundColor3 = Library.Theme.Accent
                 fill.BorderSizePixel = 0
                 fill.ClipsDescendants = false
                 fill.Parent = track
@@ -1598,8 +1597,8 @@ function Library.CreateWindow(config)
 
                 local fGrad = Instance.new("UIGradient")
                 fGrad.Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0, Color3.fromRGB(180, 180, 195)),
-                    ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))
+                    ColorSequenceKeypoint.new(0, Library.Theme.Accent),
+                    ColorSequenceKeypoint.new(1, Library.Theme.AccentGlow)
                 })
                 fGrad.Parent = fill
 
@@ -1609,7 +1608,7 @@ function Library.CreateWindow(config)
                 fillCap.Size = UDim2.new(0, 2, 1, 2)
                 fillCap.AnchorPoint = Vector2.new(1, 0.5)
                 fillCap.Position = UDim2.new(1, 0, 0.5, 0)
-                fillCap.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                fillCap.BackgroundColor3 = Library.Theme.AccentGlow
                 fillCap.BorderSizePixel = 0
                 fillCap.Parent = fill
 
@@ -3208,13 +3207,14 @@ Library.CurrentWindow = Window
 -- ==========================================
 -- TAB 1: LEGIT
 -- ==========================================
+local H = {}
 local legitTab = Window:CreateTab("Legit")
 local subLegitAim = legitTab:CreateSubtab("Aimbot")
 local subTrigger = legitTab:CreateSubtab("Triggerbot")
 
 -- Legit Aimbot Groupbox
 local gbLegitAim = subLegitAim:CreateGroupbox("Legit Targeting", "Left")
-gbLegitAim:AddToggle("Enable Legit Aimbot", Config.Legit.AimbotEnabled, {
+H["Config.Legit.AimbotEnabled"] = gbLegitAim:AddToggle("Enable Legit Aimbot", Config.Legit.AimbotEnabled, {
     HasKeybind = true,
     Callback = function(val) Config.Legit.AimbotEnabled = val end,
 })
@@ -3224,10 +3224,10 @@ end)
 gbLegitAim:AddDropdown("Target Bone", {"Head", "UpperTorso", "HumanoidRootPart"}, "Head", function(val)
     Config.Legit.Part = val
 end)
-gbLegitAim:AddToggle("Movement Prediction", Config.Legit.Prediction, {
+H["Config.Legit.Prediction"] = gbLegitAim:AddToggle("Movement Prediction", Config.Legit.Prediction, {
     Callback = function(val) Config.Legit.Prediction = val end,
 })
-gbLegitAim:AddToggle("Show FOV Circle", Config.Legit.ShowCircle, {
+H["Config.Legit.ShowCircle"] = gbLegitAim:AddToggle("Show FOV Circle", Config.Legit.ShowCircle, {
     Callback = function(val) Config.Legit.ShowCircle = val end,
 })
 gbLegitAim:AddColorPicker("FOV Circle Color", Config.Legit.CircleColor, function(col)
@@ -3235,10 +3235,10 @@ gbLegitAim:AddColorPicker("FOV Circle Color", Config.Legit.CircleColor, function
 end)
 
 local gbLegitTuning = subLegitAim:CreateGroupbox("Smoothing & Dynamics", "Right")
-gbLegitTuning:AddSlider("Field of View", 20, 350, Config.Legit.FOV, "px", function(val)
+H["Config.Legit.FOV"] = gbLegitTuning:AddSlider("Field of View", 20, 350, Config.Legit.FOV, "px", function(val)
     Config.Legit.FOV = val
 end)
-gbLegitTuning:AddSlider("Smoothing Factor", 3, 40, Config.Legit.Smoothing, "", function(val)
+H["Config.Legit.Smoothing"] = gbLegitTuning:AddSlider("Smoothing Factor", 3, 40, Config.Legit.Smoothing, "", function(val)
     Config.Legit.Smoothing = val
 end)
 gbLegitTuning:AddSlider("Prediction Lead", 1, 10, 4, "0ms", function(val)
@@ -3247,7 +3247,7 @@ end)
 
 -- Triggerbot Subtab
 local gbTrigger = subTrigger:CreateGroupbox("Triggerbot Core", "Left")
-gbTrigger:AddToggle("Enable Triggerbot", Config.Legit.Triggerbot, {
+H["Config.Legit.Triggerbot"] = gbTrigger:AddToggle("Enable Triggerbot", Config.Legit.Triggerbot, {
     HasKeybind = true,
     Callback = function(val) Config.Legit.Triggerbot = val end,
 })
@@ -3264,28 +3264,28 @@ local subRageSilent = rageTab:CreateSubtab("Silent Aim")
 
 -- Ragebot Groupbox
 local gbRageCore = subRageCore:CreateGroupbox("Ragebot Master", "Left")
-gbRageCore:AddToggle("Master Rage Switch", Config.Rage.Enabled, {
+H["Config.Rage.Enabled"] = gbRageCore:AddToggle("Master Rage Switch", Config.Rage.Enabled, {
     HasKeybind = true,
     Callback = function(val) Config.Rage.Enabled = val end,
 })
-gbRageCore:AddToggle("Camera Snapping (Ragebot)", Config.Rage.Ragebot, {
+H["Config.Rage.Ragebot"] = gbRageCore:AddToggle("Camera Snapping (Ragebot)", Config.Rage.Ragebot, {
     Callback = function(val) Config.Rage.Ragebot = val end,
 })
-gbRageCore:AddToggle("Auto Shoot (Instant Trigger)", Config.Rage.AutoShoot, {
+H["Config.Rage.AutoShoot"] = gbRageCore:AddToggle("Auto Shoot (Instant Trigger)", Config.Rage.AutoShoot, {
     Callback = function(val) Config.Rage.AutoShoot = val end,
 })
-gbRageCore:AddToggle("360 Degree Targeting", Config.Rage.Mode360, {
+H["Config.Rage.Mode360"] = gbRageCore:AddToggle("360 Degree Targeting", Config.Rage.Mode360, {
     Callback = function(val) Config.Rage.Mode360 = val end,
 })
-gbRageCore:AddToggle("Target Bots & NPCs", Config.Rage.TargetBots, {
+H["Config.Rage.TargetBots"] = gbRageCore:AddToggle("Target Bots & NPCs", Config.Rage.TargetBots, {
     Callback = function(val) Config.Rage.TargetBots = val end,
 })
 
 local gbRageTuning = subRageCore:CreateGroupbox("Rage Parameters", "Right")
-gbRageTuning:AddSlider("Rage FOV", 50, 800, Config.Rage.FOV, "px", function(val)
+H["Config.Rage.FOV"] = gbRageTuning:AddSlider("Rage FOV", 50, 800, Config.Rage.FOV, "px", function(val)
     Config.Rage.FOV = val
 end)
-gbRageTuning:AddSlider("Fire Interval Delay", 1, 20, 1, "0ms", function(val)
+gbRageTuning:AddSlider("Fire Interval (x10ms)", 1, 20, 1, "", function(val)
     Config.Rage.AutoShootDelay = val / 100
 end)
 gbRageTuning:AddColorPicker("Rage Circle Color", Config.Rage.CircleColor, function(col)
@@ -3294,14 +3294,14 @@ end)
 
 -- Silent Aim Subtab
 local gbRageSilent = subRageSilent:CreateGroupbox("Silent Redirection", "Left")
-gbRageSilent:AddToggle("Enable Silent Aim", Config.Rage.SilentAim, {
+H["Config.Rage.SilentAim"] = gbRageSilent:AddToggle("Enable Silent Aim", Config.Rage.SilentAim, {
     HasKeybind = true,
     Callback = function(val) Config.Rage.SilentAim = val end,
 })
-gbRageSilent:AddToggle("Always Headshot", Config.Rage.HeadshotAlways, {
+H["Config.Rage.HeadshotAlways"] = gbRageSilent:AddToggle("Always Headshot", Config.Rage.HeadshotAlways, {
     Callback = function(val) Config.Rage.HeadshotAlways = val end,
 })
-gbRageSilent:AddToggle("Wallbang (Piercing)", Config.Rage.Wallbang, {
+H["Config.Rage.Wallbang"] = gbRageSilent:AddToggle("Wallbang (Piercing)", Config.Rage.Wallbang, {
     Callback = function(val) Config.Rage.Wallbang = val end,
 })
 gbRageSilent:AddDropdown("Bone Priority", {"Head", "UpperTorso", "HumanoidRootPart"}, "Head", function(val)
@@ -3316,23 +3316,23 @@ local subEsp = visualTab:CreateSubtab("ESP")
 local subChams = visualTab:CreateSubtab("Chams & Dots")
 
 local gbEsp = subEsp:CreateGroupbox("ESP Overlays", "Left")
-gbEsp:AddToggle("Master ESP", Config.Esp.Enabled, {
+H["Config.Esp.Enabled"] = gbEsp:AddToggle("Master ESP", Config.Esp.Enabled, {
     HasKeybind = true,
     Callback = function(val) Config.Esp.Enabled = val end,
 })
-gbEsp:AddToggle("Boxes", Config.Esp.Boxes, {
+H["Config.Esp.Boxes"] = gbEsp:AddToggle("Boxes", Config.Esp.Boxes, {
     Callback = function(val) Config.Esp.Boxes = val end,
 })
-gbEsp:AddToggle("Health Bars", Config.Esp.Health, {
+H["Config.Esp.Health"] = gbEsp:AddToggle("Health Bars", Config.Esp.Health, {
     Callback = function(val) Config.Esp.Health = val end,
 })
-gbEsp:AddToggle("Names & Distance", Config.Esp.Names, {
+H["Config.Esp.Names"] = gbEsp:AddToggle("Names & Distance", Config.Esp.Names, {
     Callback = function(val) Config.Esp.Names = val end,
 })
-gbEsp:AddToggle("Tracers", Config.Esp.Tracers, {
+H["Config.Esp.Tracers"] = gbEsp:AddToggle("Tracers", Config.Esp.Tracers, {
     Callback = function(val) Config.Esp.Tracers = val end,
 })
-gbEsp:AddToggle("Target Bots & NPCs", Config.Esp.TargetBots, {
+H["Config.Esp.TargetBots"] = gbEsp:AddToggle("Target Bots & NPCs", Config.Esp.TargetBots, {
     Callback = function(val) Config.Esp.TargetBots = val end,
 })
 
@@ -3348,13 +3348,13 @@ gbEspColors:AddColorPicker("Tracer Color", Config.Esp.TracerColor, function(col)
 end)
 
 local gbChams = subChams:CreateGroupbox("Indicators & Skeleton", "Left")
-gbChams:AddToggle("Skeleton ESP (Bone Rig)", Config.Esp.Skeletons, {
+H["Config.Esp.Skeletons"] = gbChams:AddToggle("Skeleton ESP (Bone Rig)", Config.Esp.Skeletons, {
     Callback = function(val) Config.Esp.Skeletons = val end,
 })
 gbChams:AddColorPicker("Skeleton Color", Config.Esp.SkeletonColor, function(col)
     Config.Esp.SkeletonColor = col
 end)
-gbChams:AddToggle("Head Target Dot", Config.Esp.HeadDots, {
+H["Config.Esp.HeadDots"] = gbChams:AddToggle("Head Target Dot", Config.Esp.HeadDots, {
     Callback = function(val) Config.Esp.HeadDots = val end,
 })
 gbChams:AddColorPicker("Head Dot Color", Config.Esp.HeadDotColor, function(col)
@@ -3369,29 +3369,29 @@ local subLocomotion = charTab:CreateSubtab("Locomotion")
 local subSurvival = charTab:CreateSubtab("Survival")
 
 local gbLoco = subLocomotion:CreateGroupbox("Movement Physics", "Left")
-gbLoco:AddToggle("Speed Hack", Config.Character.SpeedHack, {
+H["Config.Character.SpeedHack"] = gbLoco:AddToggle("Speed Hack", Config.Character.SpeedHack, {
     HasKeybind = true,
     Callback = function(val) Config.Character.SpeedHack = val end,
 })
 gbLoco:AddSlider("Speed Multiplier", 1, 10, 2.5, "x", function(val)
     Config.Character.SpeedMultiplier = val
 end)
-gbLoco:AddToggle("Bunny Hop (Auto Jump)", Config.Character.BunnyHop, {
+H["Config.Character.BunnyHop"] = gbLoco:AddToggle("Bunny Hop (Auto Jump)", Config.Character.BunnyHop, {
     HasKeybind = true,
     Callback = function(val) Config.Character.BunnyHop = val end,
 })
 
 local gbSurv = subSurvival:CreateGroupbox("Air & Integrity", "Right")
-gbSurv:AddToggle("AirJump (Infinite)", Config.Character.AirJump, {
+H["Config.Character.AirJump"] = gbSurv:AddToggle("AirJump (Infinite)", Config.Character.AirJump, {
     Callback = function(val) Config.Character.AirJump = val end,
 })
-gbSurv:AddSlider("AirJump Velocity", 20, 100, Config.Character.JumpPower, " studs", function(val)
+H["Config.Character.JumpPower"] = gbSurv:AddSlider("AirJump Velocity", 20, 100, Config.Character.JumpPower, " studs", function(val)
     Config.Character.JumpPower = val
 end)
-gbSurv:AddToggle("Anti Fall Damage", Config.Character.AntiFallDamage, {
+H["Config.Character.AntiFallDamage"] = gbSurv:AddToggle("Anti Fall Damage", Config.Character.AntiFallDamage, {
     Callback = function(val) Config.Character.AntiFallDamage = val end,
 })
-gbSurv:AddToggle("Anti-Kill / Suicide Block", Config.Misc.PreventKill, {
+H["Config.Misc.PreventKill"] = gbSurv:AddToggle("Anti-Kill / Suicide Block", Config.Misc.PreventKill, {
     HasKeybind = true,
     Callback = function(val) Config.Misc.PreventKill = val end,
 })
@@ -3404,56 +3404,125 @@ local subCamera = miscTab:CreateSubtab("Camera")
 local subEngine = miscTab:CreateSubtab("Presets")
 
 local gbCam = subCamera:CreateGroupbox("3rd Person Camera", "Left")
-gbCam:AddToggle("Enable 3rd Person View", Config.Camera.ThirdPerson, {
+H["Config.Camera.ThirdPerson"] = gbCam:AddToggle("Enable 3rd Person View", Config.Camera.ThirdPerson, {
     HasKeybind = true,
     Callback = function(val) Config.Camera.ThirdPerson = val end,
 })
-gbCam:AddSlider("Camera Distance", 5, 30, Config.Camera.ThirdPersonDistance, " studs", function(val)
+H["Config.Camera.ThirdPersonDistance"] = gbCam:AddSlider("Camera Distance", 5, 30, Config.Camera.ThirdPersonDistance, " studs", function(val)
     Config.Camera.ThirdPersonDistance = val
 end)
-gbCam:AddToggle("Custom Field of View", Config.Camera.FOVChanger, {
+H["Config.Camera.FOVChanger"] = gbCam:AddToggle("Custom Field of View", Config.Camera.FOVChanger, {
     Callback = function(val) Config.Camera.FOVChanger = val end,
 })
-gbCam:AddSlider("Field of View", 60, 120, Config.Camera.CustomFOV, " deg", function(val)
+H["Config.Camera.CustomFOV"] = gbCam:AddSlider("Field of View", 60, 120, Config.Camera.CustomFOV, " deg", function(val)
     Config.Camera.CustomFOV = val
 end)
 
-local gbPresets = subEngine:CreateGroupbox("Quick Config Profiles", "Right")
-gbCam:AddToggle("Show Watermark", true, {
-    Callback = function(val) Window.Watermark.Visible = val end,
-})
+local function applyPreset(values)
+    for key, v in pairs(values) do
+        local h = H[key]
+        if h then
+            h.SetValue(v)
+        else
+            local t, k = key:match("^Config%.(%w+)%.(%w+)$")
+            if t and Config[t] then Config[t][k] = v end
+        end
+    end
+end
 
+local function resetAllToggles()
+    for _, h in pairs(H) do
+        if type(h.GetValue()) == "boolean" then h.SetValue(false) end
+    end
+end
+
+local gbPresets = subEngine:CreateGroupbox("Quick Config Profiles", "Left")
+gbPresets:AddLabel("Applies settings and syncs the menu")
 gbPresets:AddButton("Load Legit Profile", function()
-    Config.Rage.Enabled = false
-    Config.Legit.AimbotEnabled = true
-    Config.Legit.FOV = 85
-    Config.Legit.Smoothing = 18
-    Config.Legit.Triggerbot = true
-    Config.Legit.ShowCircle = true
-    Config.Esp.Boxes = true
-    Config.Esp.Health = true
-    Config.Esp.Names = true
-    Config.Esp.Tracers = false
-    Config.Character.SpeedHack = false
+    resetAllToggles()
+    applyPreset({
+        ["Config.Legit.AimbotEnabled"] = true,
+        ["Config.Legit.Prediction"] = true,
+        ["Config.Legit.ShowCircle"] = true,
+        ["Config.Legit.FOV"] = 85,
+        ["Config.Legit.Smoothing"] = 18,
+        ["Config.Esp.Enabled"] = true,
+        ["Config.Esp.Boxes"] = true,
+        ["Config.Esp.Health"] = true,
+        ["Config.Esp.Names"] = true,
+    })
     Library.Notify("Legit profile applied")
 end)
-
 gbPresets:AddButton("Load Rage Profile", function()
-    Config.Rage.Enabled = true
-    Config.Rage.Ragebot = true
-    Config.Rage.SilentAim = true
-    Config.Rage.AutoShoot = true
-    Config.Rage.Mode360 = true
-    Config.Rage.HeadshotAlways = true
-    Config.Rage.Wallbang = true
-    Config.Legit.AimbotEnabled = false
-    Config.Esp.Boxes = true
-    Config.Esp.Health = true
-    Config.Esp.Names = true
-    Config.Esp.Tracers = true
-    Config.Character.SpeedHack = true
-    Config.Character.SpeedMultiplier = 3.5
+    resetAllToggles()
+    applyPreset({
+        ["Config.Rage.Enabled"] = true,
+        ["Config.Rage.Ragebot"] = true,
+        ["Config.Rage.SilentAim"] = true,
+        ["Config.Rage.AutoShoot"] = true,
+        ["Config.Rage.Mode360"] = true,
+        ["Config.Rage.HeadshotAlways"] = true,
+        ["Config.Rage.Wallbang"] = true,
+        ["Config.Esp.Enabled"] = true,
+        ["Config.Esp.Boxes"] = true,
+        ["Config.Esp.Health"] = true,
+        ["Config.Esp.Names"] = true,
+        ["Config.Esp.Tracers"] = true,
+        ["Config.Character.SpeedHack"] = true,
+        ["Config.Character.SpeedMultiplier"] = 3,
+    })
     Library.Notify("Rage profile applied")
+end)
+gbPresets:AddButton("Visuals Only Profile", function()
+    resetAllToggles()
+    applyPreset({
+        ["Config.Esp.Enabled"] = true,
+        ["Config.Esp.Boxes"] = true,
+        ["Config.Esp.Health"] = true,
+        ["Config.Esp.Names"] = true,
+        ["Config.Esp.Skeletons"] = true,
+        ["Config.Esp.TargetBots"] = true,
+    })
+    Library.Notify("Visuals profile applied")
+end)
+gbPresets:AddButton("Disable Everything", function()
+    resetAllToggles()
+    Library.Notify("All features disabled")
+end)
+
+local gbUtil = subEngine:CreateGroupbox("Utility", "Right")
+gbUtil:AddButton("Reset Camera FOV", function()
+    if H["Config.Camera.FOVChanger"] then H["Config.Camera.FOVChanger"].SetValue(false) end
+    if H["Config.Camera.CustomFOV"] then H["Config.Camera.CustomFOV"].SetValue(70) end
+    Camera.FieldOfView = 70
+    Library.Notify("Camera FOV reset")
+end)
+gbUtil:AddButton("Rejoin Server", function()
+    pcall(function()
+        game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+    end)
+end)
+gbUtil:AddButton("Server Hop", function()
+    local ok, err = pcall(function()
+        local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100", game.PlaceId)
+        local data = game:GetService("HttpService"):JSONDecode(game:HttpGet(url))
+        for _, s in ipairs(data.data) do
+            if s.id ~= game.JobId and s.playing < s.maxPlayers then
+                game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, s.id, LocalPlayer)
+                return
+            end
+        end
+        error("no open server")
+    end)
+    if not ok then Library.Notify("Server hop failed: " .. tostring(err)) end
+end)
+gbUtil:AddButton("Copy Game Link", function()
+    if setclipboard then
+        setclipboard(string.format("https://www.roblox.com/games/%d", game.PlaceId))
+        Library.Notify("Game link copied")
+    else
+        Library.Notify("Clipboard not supported")
+    end
 end)
 
 local setTab = Window:CreateTab("Settings")
@@ -3462,6 +3531,9 @@ local gbMenu = subMenu:CreateGroupbox("Interface", "Left")
 gbMenu:AddKeybind("Menu Key", Enum.KeyCode.RightShift, function(key)
     Window:SetToggleKey(key or Enum.KeyCode.RightShift)
 end)
+gbMenu:AddToggle("Show Watermark", true, {
+    Callback = function(val) Window.Watermark.Visible = val end,
+})
 gbMenu:AddToggle("Keybind List", true, {
     Callback = function(val)
         Library.BindHudEnabled = val
