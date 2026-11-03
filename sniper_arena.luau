@@ -56,6 +56,14 @@ local mousemoverel = getGlobal("mousemoverel")
 
 local isMenuVisible = true
 
+local function newDrawing(kind)
+    if hasDrawing then
+        local ok, obj = pcall(DrawingLib.new, kind)
+        if ok and obj then return obj end
+    end
+    return setmetatable({}, { __newindex = function() end, __index = function() return function() end end })
+end
+
 -- =========================================================================
 -- SECTION 2: AUTO MOUSE UNLOCK (NO ESC REQUIRED)
 -- =========================================================================
@@ -180,15 +188,15 @@ Library.Theme = {
 
     NavbarBg = Color3.fromRGB(8, 8, 10),
     TabActiveBg = Color3.fromRGB(20, 20, 24),
-    TabActiveBorder = Color3.fromRGB(48, 48, 56),
+    TabActiveBorder = Color3.fromRGB(46, 74, 120),
     TabInactiveText = Color3.fromRGB(130, 130, 142),
     TabActiveText = Color3.fromRGB(255, 255, 255),
     TabHoverBg = Color3.fromRGB(14, 14, 18),
 
-    Accent = Color3.fromRGB(235, 235, 240),
-    AccentGlow = Color3.fromRGB(255, 255, 255),
-    AccentDim = Color3.fromRGB(165, 165, 175),
-    AccentSecondary = Color3.fromRGB(185, 185, 195),
+    Accent = Color3.fromRGB(86, 156, 255),
+    AccentGlow = Color3.fromRGB(120, 180, 255),
+    AccentDim = Color3.fromRGB(60, 110, 190),
+    AccentSecondary = Color3.fromRGB(150, 120, 255),
 
     GroupboxBg = Color3.fromRGB(13, 13, 16),
     GroupboxBorder = Color3.fromRGB(26, 26, 32),
@@ -202,7 +210,7 @@ Library.Theme = {
     InputBorder = Color3.fromRGB(30, 30, 36),
 
     SliderTrack = Color3.fromRGB(16, 16, 20),
-    SliderFill = Color3.fromRGB(235, 235, 240),
+    SliderFill = Color3.fromRGB(86, 156, 255),
     SliderText = Color3.fromRGB(250, 250, 255),
 
     FontTitle = Enum.Font.GothamMedium,
@@ -345,8 +353,8 @@ function Library.CreateWindow(config)
 
     local titleLabel = Instance.new("TextLabel")
     titleLabel.Name = "TitleLabel"
-    titleLabel.Size = UDim2.new(1, -36, 1, 0)
-    titleLabel.Position = UDim2.new(0, 28, 0, 0)
+    titleLabel.Size = UDim2.new(1, -36, 0, 30)
+    titleLabel.Position = UDim2.new(0, 28, 0, 6)
     titleLabel.BackgroundTransparency = 1
     titleLabel.Font = Library.Theme.FontTitle
     titleLabel.TextSize = 15
@@ -354,6 +362,36 @@ function Library.CreateWindow(config)
     titleLabel.TextXAlignment = Enum.TextXAlignment.Left
     titleLabel.Text = "snow.cc"
     titleLabel.Parent = titleBar
+
+    local gameLabel = Instance.new("TextLabel")
+    gameLabel.Name = "GameLabel"
+    gameLabel.Size = UDim2.new(1, -36, 0, 14)
+    gameLabel.Position = UDim2.new(0, 28, 0, 28)
+    gameLabel.BackgroundTransparency = 1
+    gameLabel.Font = Library.Theme.FontBody
+    gameLabel.TextSize = 10
+    gameLabel.TextColor3 = Library.Theme.MutedText
+    gameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    gameLabel.Text = gameName
+    gameLabel.Parent = titleBar
+
+    titleGlow.BackgroundColor3 = Library.Theme.Accent
+    titleGlow.Position = UDim2.new(0, 16, 0, 17)
+
+    local accentLine = Instance.new("Frame")
+    accentLine.Name = "AccentLine"
+    accentLine.Size = UDim2.new(1, 0, 0, 2)
+    accentLine.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    accentLine.BorderSizePixel = 0
+    accentLine.ZIndex = 5
+    accentLine.Parent = mainFrame
+
+    local accentGrad = Instance.new("UIGradient")
+    accentGrad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Library.Theme.Accent),
+        ColorSequenceKeypoint.new(1, Library.Theme.AccentSecondary),
+    })
+    accentGrad.Parent = accentLine
 
     makeDraggable(titleBar, mainFrame)
 
@@ -491,7 +529,133 @@ function Library.CreateWindow(config)
     popupOverlay.ZIndex = 9000
     popupOverlay.Parent = screenGui
 
+    -- Notifications (bottom-right stack)
+    local notifyHolder = Instance.new("Frame")
+    notifyHolder.Name = "Notifications"
+    notifyHolder.Size = UDim2.new(0, 260, 1, -24)
+    notifyHolder.Position = UDim2.new(1, -272, 0, 0)
+    notifyHolder.BackgroundTransparency = 1
+    notifyHolder.ZIndex = 9500
+    notifyHolder.Parent = screenGui
+
+    local notifyLayout = Instance.new("UIListLayout")
+    notifyLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+    notifyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    notifyLayout.Padding = UDim.new(0, 6)
+    notifyLayout.Parent = notifyHolder
+
+    local notifyCount = 0
+    function Library.Notify(text, duration)
+        notifyCount = notifyCount + 1
+        local card = Instance.new("Frame")
+        card.Size = UDim2.new(1, 0, 0, 34)
+        card.LayoutOrder = notifyCount
+        card.BackgroundColor3 = Library.Theme.GroupboxBg
+        card.BackgroundTransparency = 1
+        card.BorderSizePixel = 0
+        card.ZIndex = 9501
+        card.Parent = notifyHolder
+
+        local cStroke = Instance.new("UIStroke")
+        cStroke.Color = Library.Theme.Accent
+        cStroke.Transparency = 1
+        cStroke.Parent = card
+
+        local cCorner = Instance.new("UICorner")
+        cCorner.CornerRadius = UDim.new(0, 6)
+        cCorner.Parent = card
+
+        local bar = Instance.new("Frame")
+        bar.Size = UDim2.new(0, 3, 1, -12)
+        bar.Position = UDim2.new(0, 6, 0, 6)
+        bar.BackgroundColor3 = Library.Theme.Accent
+        bar.BackgroundTransparency = 1
+        bar.BorderSizePixel = 0
+        bar.ZIndex = 9502
+        bar.Parent = card
+
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(1, -24, 1, 0)
+        lbl.Position = UDim2.new(0, 18, 0, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.Font = Library.Theme.FontBody
+        lbl.TextSize = 11
+        lbl.TextColor3 = Library.Theme.TitlebarText
+        lbl.TextTransparency = 1
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.Text = tostring(text)
+        lbl.ZIndex = 9502
+        lbl.Parent = card
+
+        local info = TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+        TweenService:Create(card, info, { BackgroundTransparency = 0.05 }):Play()
+        TweenService:Create(cStroke, info, { Transparency = 0.5 }):Play()
+        TweenService:Create(bar, info, { BackgroundTransparency = 0 }):Play()
+        TweenService:Create(lbl, info, { TextTransparency = 0 }):Play()
+
+        task.delay(duration or 3, function()
+            local out = TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
+            TweenService:Create(card, out, { BackgroundTransparency = 1 }):Play()
+            TweenService:Create(cStroke, out, { Transparency = 1 }):Play()
+            TweenService:Create(bar, out, { BackgroundTransparency = 1 }):Play()
+            TweenService:Create(lbl, out, { TextTransparency = 1 }):Play()
+            task.wait(0.3)
+            card:Destroy()
+        end)
+    end
+
+    -- Watermark (name | game | fps | ping)
+    local watermark = Instance.new("Frame")
+    watermark.Name = "Watermark"
+    watermark.AutomaticSize = Enum.AutomaticSize.X
+    watermark.Size = UDim2.new(0, 0, 0, 24)
+    watermark.Position = UDim2.new(0, 12, 0, 12)
+    watermark.BackgroundColor3 = Library.Theme.WindowBg
+    watermark.BackgroundTransparency = 0.1
+    watermark.BorderSizePixel = 0
+    watermark.ZIndex = 9400
+    watermark.Parent = screenGui
+
+    local wmCorner = Instance.new("UICorner")
+    wmCorner.CornerRadius = UDim.new(0, 5)
+    wmCorner.Parent = watermark
+
+    local wmStroke = Instance.new("UIStroke")
+    wmStroke.Color = Library.Theme.Accent
+    wmStroke.Transparency = 0.55
+    wmStroke.Parent = watermark
+
+    local wmPad = Instance.new("UIPadding")
+    wmPad.PaddingLeft = UDim.new(0, 10)
+    wmPad.PaddingRight = UDim.new(0, 10)
+    wmPad.Parent = watermark
+
+    local wmLabel = Instance.new("TextLabel")
+    wmLabel.AutomaticSize = Enum.AutomaticSize.X
+    wmLabel.Size = UDim2.new(0, 0, 1, 0)
+    wmLabel.BackgroundTransparency = 1
+    wmLabel.Font = Library.Theme.FontBody
+    wmLabel.TextSize = 11
+    wmLabel.TextColor3 = Library.Theme.TitlebarText
+    wmLabel.RichText = true
+    wmLabel.ZIndex = 9401
+    wmLabel.Parent = watermark
+
+    local frames, lastWm = 0, os.clock()
+    RunService.RenderStepped:Connect(function()
+        frames = frames + 1
+        local now = os.clock()
+        if now - lastWm >= 0.5 then
+            local fps = math.floor(frames / (now - lastWm) + 0.5)
+            frames, lastWm = 0, now
+            local ping = 0
+            pcall(function() ping = math.floor(LocalPlayer:GetNetworkPing() * 2000) end)
+            wmLabel.Text = string.format('<font color="rgb(86,156,255)">snow.cc</font>  |  %s  |  %d fps  |  %d ms', gameName, fps, ping)
+        end
+    end)
+
     local Window = {
+        Watermark = watermark,
         ScreenGui = screenGui,
         MainFrame = mainFrame,
         PopupOverlay = popupOverlay,
@@ -1027,9 +1191,13 @@ function Library.CreateWindow(config)
                 box.Parent = row
 
                 local boxStroke = Instance.new("UIStroke")
-                boxStroke.Color = Library.Theme.InputBorder
+                boxStroke.Color = state and Library.Theme.Accent or Library.Theme.InputBorder
                 boxStroke.Thickness = 1
                 boxStroke.Parent = box
+
+                local boxCorner = Instance.new("UICorner")
+                boxCorner.CornerRadius = UDim.new(0, 3)
+                boxCorner.Parent = box
 
                 local textBtn = Instance.new("TextButton")
                 textBtn.Name = "LabelBtn"
@@ -1042,6 +1210,12 @@ function Library.CreateWindow(config)
                 textBtn.TextXAlignment = Enum.TextXAlignment.Left
                 textBtn.Text = label
                 textBtn.Parent = row
+
+                local function paintToggle()
+                    TweenService:Create(box, TweenInfo.new(0.12), { BackgroundColor3 = state and Library.Theme.Accent or Library.Theme.InputBg }):Play()
+                    TweenService:Create(boxStroke, TweenInfo.new(0.12), { Color = state and Library.Theme.Accent or Library.Theme.InputBorder }):Play()
+                    textBtn.TextColor3 = state and Color3.fromRGB(255, 255, 255) or Library.Theme.LabelText
+                end
 
                 if keybind ~= nil or onKeyChanged ~= nil then
                     local currentKey = keybind
@@ -1108,8 +1282,7 @@ function Library.CreateWindow(config)
 
                 local function toggleState()
                     state = not state
-                    box.BackgroundColor3 = state and Library.Theme.Accent or Library.Theme.InputBg
-                    textBtn.TextColor3 = state and Color3.fromRGB(255, 255, 255) or Library.Theme.LabelText
+                    paintToggle()
                     if callback then pcall(callback, state) end
                 end
 
@@ -1119,8 +1292,7 @@ function Library.CreateWindow(config)
                 return {
                     SetValue = function(newVal)
                         state = newVal
-                        box.BackgroundColor3 = state and Library.Theme.Accent or Library.Theme.InputBg
-                        textBtn.TextColor3 = state and Color3.fromRGB(255, 255, 255) or Library.Theme.LabelText
+                        paintToggle()
                         if callback then pcall(callback, state) end
                     end,
                     GetValue = function() return state end,
@@ -2184,7 +2356,16 @@ pcall(function()
 end)
 
 -- Unified Root Finder: Deduplicates nested models to ensure EXACTLY 1 entry per character
-local function getPotentialTargets()
+local targetCache = { [true] = { t = 0, list = {} }, [false] = { t = 0, list = {} } }
+
+local function getPotentialTargets(includeBots)
+    includeBots = includeBots and true or false
+    local cached = targetCache[includeBots]
+    local nowClock = os.clock()
+    if nowClock - cached.t < 0.1 then
+        return cached.list
+    end
+
     local list = {}
     local seen = {}
     
@@ -2232,8 +2413,7 @@ local function getPotentialTargets()
     end
     
     -- 2. Bots via WorldManager Focused Entities
-    local shouldIncludeBots = Config.Rage.TargetBots or Config.Esp.TargetBots
-    if shouldIncludeBots then
+    if includeBots then
         if WorldManager and WorldManager.GetFocusedEntities then
             pcall(function()
                 local entities = WorldManager:GetFocusedEntities()
@@ -2267,6 +2447,8 @@ local function getPotentialTargets()
         end
     end
     
+    cached.t = nowClock
+    cached.list = list
     return list
 end
 
@@ -2275,7 +2457,7 @@ local function getClosestTarget(mode360, maxFov, targetPart)
     local bestDist = mode360 and math.huge or maxFov
     local mousePos = UserInputService:GetMouseLocation()
     
-    for _, t in ipairs(getPotentialTargets()) do
+    for _, t in ipairs(getPotentialTargets(Config.Rage.TargetBots)) do
         local model = t.Model
         local hum = t.Humanoid
         local bone = model:FindFirstChild(targetPart) or model:FindFirstChild("Head") or t.Root
@@ -2392,38 +2574,32 @@ UserInputService.JumpRequest:Connect(function()
     end
 end)
 
--- Prevent Height / Suicide Kill
-pcall(function()
-    local remotes = ReplicatedStorage:FindFirstChild("Remote") and ReplicatedStorage.Remote:FindFirstChild("Any")
-    if remotes then
-        local td = remotes:FindFirstChild("TouchDead")
-        local suicide = remotes:FindFirstChild("Suicide")
-        if td and td:IsA("RemoteEvent") then
-            local oldFire = td.FireServer
-            td.FireServer = function(...)
-                if Config.Misc.PreventKill then return end
-                return oldFire(...)
+-- Prevent Height / Suicide Kill (namecall hook; remote methods cannot be overwritten directly)
+if typeof(hookmeta) == "function" then
+    pcall(function()
+        local oldNamecall
+        oldNamecall = hookmeta(game, "__namecall", newccl(function(self, ...)
+            if Config.Misc.PreventKill and getnamecallmethod() == "FireServer" and typeof(self) == "Instance" and (self.Name == "TouchDead" or self.Name == "Suicide") then
+                return
             end
-        end
-        if suicide and suicide:IsA("RemoteEvent") then
-            local oldFire = suicide.FireServer
-            suicide.FireServer = function(...)
-                if Config.Misc.PreventKill then return end
-                return oldFire(...)
-            end
-        end
-    end
-end)
+            return oldNamecall(self, ...)
+        end))
+    end)
+end
 
 -- Robust Camera & Mouse Lock-on (Right-Click Hold)
 local isAiming = false
+local function matchesAimKey(input)
+    local key = Config.Legit.Key
+    return input.UserInputType == key or input.KeyCode == key
+end
 UserInputService.InputBegan:Connect(function(input, gp)
-    if input.UserInputType == Config.Legit.Key then
+    if not gp and matchesAimKey(input) then
         isAiming = true
     end
 end)
 UserInputService.InputEnded:Connect(function(input, gp)
-    if input.UserInputType == Config.Legit.Key then
+    if matchesAimKey(input) then
         isAiming = false
     end
 end)
@@ -2454,24 +2630,36 @@ local function executeNativeShot(target)
     end
 end
 
--- 3rd Person Camera Engine (CameraOffset & Spring Simulation)
-RunService.RenderStepped:Connect(function()
-    if LocalPlayer.Character then
-        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if hum then
-            if Config.Camera.ThirdPerson then
-                LocalPlayer.CameraMaxZoomDistance = 128
-                LocalPlayer.CameraMinZoomDistance = 5
-                hum.CameraOffset = Vector3.new(Config.Camera.ThirdPersonOffset.X, Config.Camera.ThirdPersonOffset.Y, -Config.Camera.ThirdPersonDistance)
-            else
-                hum.CameraOffset = Vector3.new(0, 0, 0)
-            end
-        end
-    end
-    
+-- 3rd Person Camera Engine (runs right after the default camera so it is not overwritten)
+RunService:BindToRenderStep("snowcc_thirdperson", Enum.RenderPriority.Camera.Value + 1, function()
     if Config.Camera.FOVChanger then
         Camera.FieldOfView = Config.Camera.CustomFOV
     end
+
+    local char = LocalPlayer.Character
+    local head = char and char:FindFirstChild("Head")
+    if not (Config.Camera.ThirdPerson and head) then return end
+
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") and part.LocalTransparencyModifier > 0 then
+            part.LocalTransparencyModifier = 0
+        end
+    end
+
+    local cf = Camera.CFrame
+    local offset = Config.Camera.ThirdPersonOffset
+    local origin = head.Position
+    local desired = origin - cf.LookVector * Config.Camera.ThirdPersonDistance + cf.RightVector * offset.X + cf.UpVector * offset.Y
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = { char }
+    local hit = Workspace:Raycast(origin, desired - origin, params)
+    if hit then
+        desired = hit.Position + (origin - desired).Unit * 0.5
+    end
+
+    Camera.CFrame = CFrame.new(desired) * cf.Rotation
 end)
 
 -- Main RenderStepped Execution Loop (Legit Aimbot, Ragebot, AutoShoot, Locomotion)
@@ -2480,7 +2668,7 @@ RunService.RenderStepped:Connect(function()
     local now = tick()
 
     -- 1. LEGIT AIMBOT
-    if not Config.Rage.Enabled and Config.Legit.AimbotEnabled and (isAiming or UserInputService:IsMouseButtonPressed(Config.Legit.Key)) and not isMenuVisible then
+    if not Config.Rage.Enabled and Config.Legit.AimbotEnabled and isAiming and not isMenuVisible then
         local target = getClosestTarget(false, Config.Legit.FOV, Config.Legit.Part)
         if target then
             local aimPos = target.WorldPos
@@ -2489,19 +2677,14 @@ RunService.RenderStepped:Connect(function()
                 aimPos = aimPos + (vel * Config.Legit.PredictionLead)
             end
             
-            local currentCF = Camera.CFrame
-            local targetCF = CFrame.new(currentCF.Position, aimPos)
             local smooth = math.clamp(Config.Legit.Smoothing, 1, 40)
-            Camera.CFrame = currentCF:Lerp(targetCF, 1 / smooth)
-            
-            if mousemoverel then
-                local sp, onScreen = Camera:WorldToViewportPoint(aimPos)
-                if onScreen then
-                    local mousePos = UserInputService:GetMouseLocation()
-                    local deltaX = (sp.X - mousePos.X) / smooth
-                    local deltaY = (sp.Y - mousePos.Y) / smooth
-                    mousemoverel(deltaX, deltaY)
-                end
+            local sp, onScreen = Camera:WorldToViewportPoint(aimPos)
+            if typeof(mousemoverel) == "function" and onScreen then
+                local mousePos = UserInputService:GetMouseLocation()
+                mousemoverel((sp.X - mousePos.X) / smooth, (sp.Y - mousePos.Y) / smooth)
+            else
+                local currentCF = Camera.CFrame
+                Camera.CFrame = currentCF:Lerp(CFrame.new(currentCF.Position, aimPos), 1 / smooth)
             end
         end
     end
@@ -2539,6 +2722,13 @@ RunService.RenderStepped:Connect(function()
         local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         
         if hum and hrp then
+            if Config.Character.AntiFallDamage then
+                local v = hrp.AssemblyLinearVelocity
+                if v.Y < -55 then
+                    hrp.AssemblyLinearVelocity = Vector3.new(v.X, -40, v.Z)
+                end
+            end
+
             -- Speed Hack
             if Config.Character.SpeedHack and hum.MoveDirection.Magnitude > 0.05 then
                 local targetVel = hum.MoveDirection * (16 * Config.Character.SpeedMultiplier)
@@ -2554,7 +2744,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- Drawing FOV Circles
-local LegitCircle = Drawing.new("Circle")
+local LegitCircle = newDrawing("Circle")
 LegitCircle.Thickness = 1.5
 LegitCircle.NumSides = 64
 LegitCircle.Radius = Config.Legit.FOV
@@ -2563,7 +2753,7 @@ LegitCircle.Transparency = 0.7
 LegitCircle.Color = Config.Legit.CircleColor
 LegitCircle.Visible = false
 
-local RageCircle = Drawing.new("Circle")
+local RageCircle = newDrawing("Circle")
 RageCircle.Thickness = 1.5
 RageCircle.NumSides = 64
 RageCircle.Radius = Config.Rage.FOV
@@ -2634,7 +2824,7 @@ RunService.RenderStepped:Connect(function()
         return
     end
 
-    local targets = getPotentialTargets()
+    local targets = getPotentialTargets(Config.Esp.TargetBots)
     local active = {}
 
     local menuMinX, menuMinY, menuMaxX, menuMaxY = -1, -1, -1, -1
@@ -2657,38 +2847,38 @@ RunService.RenderStepped:Connect(function()
             
             local esp = ESPMap[model]
             if not esp then
-                local box = Drawing.new("Square")
+                local box = newDrawing("Square")
                 box.Thickness = 1.5
                 box.Filled = false
                 box.Color = Config.Esp.BoxColor
                 box.Visible = false
 
-                local name = Drawing.new("Text")
+                local name = newDrawing("Text")
                 name.Size = 13
                 name.Center = true
                 name.Outline = true
                 name.Color = Config.Esp.TextColor
                 name.Visible = false
 
-                local tracer = Drawing.new("Line")
+                local tracer = newDrawing("Line")
                 tracer.Thickness = 1
                 tracer.Color = Config.Esp.TracerColor
                 tracer.Transparency = 0.7
                 tracer.Visible = false
 
-                local healthOutline = Drawing.new("Square")
+                local healthOutline = newDrawing("Square")
                 healthOutline.Thickness = 1
                 healthOutline.Filled = true
                 healthOutline.Color = Color3.fromRGB(15, 15, 15)
                 healthOutline.Visible = false
 
-                local healthBar = Drawing.new("Square")
+                local healthBar = newDrawing("Square")
                 healthBar.Thickness = 1
                 healthBar.Filled = true
                 healthBar.Color = Color3.fromRGB(0, 255, 100)
                 healthBar.Visible = false
 
-                local headDot = Drawing.new("Circle")
+                local headDot = newDrawing("Circle")
                 headDot.Radius = 3.5
                 headDot.Filled = true
                 headDot.Thickness = 1
@@ -2698,7 +2888,7 @@ RunService.RenderStepped:Connect(function()
                 -- Allocate 15 bone lines for skeleton
                 local skeletonLines = {}
                 for i = 1, 15 do
-                    local l = Drawing.new("Line")
+                    local l = newDrawing("Line")
                     l.Thickness = 1.5
                     l.Color = Config.Esp.SkeletonColor
                     l.Transparency = 0.85
@@ -2892,6 +3082,9 @@ local gbLegitAim = subLegitAim:CreateGroupbox("Legit Targeting", "Left")
 gbLegitAim:AddToggle("Enable Legit Aimbot", Config.Legit.AimbotEnabled, {
     Callback = function(val) Config.Legit.AimbotEnabled = val end,
 })
+gbLegitAim:AddKeybind("Aim Key", Config.Legit.Key, function(key)
+    Config.Legit.Key = key or Enum.UserInputType.MouseButton2
+end)
 gbLegitAim:AddDropdown("Target Bone", {"Head", "UpperTorso", "HumanoidRootPart"}, "Head", function(val)
     Config.Legit.Part = val
 end)
@@ -3053,6 +3246,9 @@ gbSurv:AddToggle("AirJump (Infinite)", Config.Character.AirJump, {
 gbSurv:AddSlider("AirJump Velocity", 20, 100, Config.Character.JumpPower, " studs", function(val)
     Config.Character.JumpPower = val
 end)
+gbSurv:AddToggle("Anti Fall Damage", Config.Character.AntiFallDamage, {
+    Callback = function(val) Config.Character.AntiFallDamage = val end,
+})
 gbSurv:AddToggle("Anti-Kill / Suicide Block", Config.Misc.PreventKill, {
     Callback = function(val) Config.Misc.PreventKill = val end,
 })
@@ -3079,6 +3275,10 @@ gbCam:AddSlider("Field of View", 60, 120, Config.Camera.CustomFOV, " deg", funct
 end)
 
 local gbPresets = subEngine:CreateGroupbox("Quick Config Profiles", "Right")
+gbCam:AddToggle("Show Watermark", true, {
+    Callback = function(val) Window.Watermark.Visible = val end,
+})
+
 gbPresets:AddButton("Load Legit Profile", function()
     Config.Rage.Enabled = false
     Config.Legit.AimbotEnabled = true
@@ -3091,7 +3291,7 @@ gbPresets:AddButton("Load Legit Profile", function()
     Config.Esp.Names = true
     Config.Esp.Tracers = false
     Config.Character.SpeedHack = false
-    print("[snow.cc] Applied Legit Profile!")
+    Library.Notify("Legit profile applied")
 end)
 
 gbPresets:AddButton("Load Rage Profile", function()
@@ -3109,7 +3309,8 @@ gbPresets:AddButton("Load Rage Profile", function()
     Config.Esp.Tracers = true
     Config.Character.SpeedHack = true
     Config.Character.SpeedMultiplier = 3.5
-    print("[snow.cc] Applied Rage Profile!")
+    Library.Notify("Rage profile applied")
 end)
 
+Library.Notify("Sniper Arena loaded - RightShift toggles the menu", 4)
 print("[snow.cc] Sniper Arena Suite v4.0 (Legit, Rage, 3rd Person, Character & Misc) initialized!")
