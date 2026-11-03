@@ -3206,6 +3206,7 @@ local subTrigger = legitTab:CreateSubtab("Triggerbot")
 -- Legit Aimbot Groupbox
 local gbLegitAim = subLegitAim:CreateGroupbox("Legit Targeting", "Left")
 gbLegitAim:AddToggle("Enable Legit Aimbot", Config.Legit.AimbotEnabled, {
+    HasKeybind = true,
     Callback = function(val) Config.Legit.AimbotEnabled = val end,
 })
 gbLegitAim:AddKeybind("Aim Key", Config.Legit.Key, function(key)
@@ -3238,6 +3239,7 @@ end)
 -- Triggerbot Subtab
 local gbTrigger = subTrigger:CreateGroupbox("Triggerbot Core", "Left")
 gbTrigger:AddToggle("Enable Triggerbot", Config.Legit.Triggerbot, {
+    HasKeybind = true,
     Callback = function(val) Config.Legit.Triggerbot = val end,
 })
 gbTrigger:AddSlider("Reaction Delay", 1, 30, 8, "0ms", function(val)
@@ -3254,6 +3256,7 @@ local subRageSilent = rageTab:CreateSubtab("Silent Aim")
 -- Ragebot Groupbox
 local gbRageCore = subRageCore:CreateGroupbox("Ragebot Master", "Left")
 gbRageCore:AddToggle("Master Rage Switch", Config.Rage.Enabled, {
+    HasKeybind = true,
     Callback = function(val) Config.Rage.Enabled = val end,
 })
 gbRageCore:AddToggle("Camera Snapping (Ragebot)", Config.Rage.Ragebot, {
@@ -3283,6 +3286,7 @@ end)
 -- Silent Aim Subtab
 local gbRageSilent = subRageSilent:CreateGroupbox("Silent Redirection", "Left")
 gbRageSilent:AddToggle("Enable Silent Aim", Config.Rage.SilentAim, {
+    HasKeybind = true,
     Callback = function(val) Config.Rage.SilentAim = val end,
 })
 gbRageSilent:AddToggle("Always Headshot", Config.Rage.HeadshotAlways, {
@@ -3304,6 +3308,7 @@ local subChams = visualTab:CreateSubtab("Chams & Dots")
 
 local gbEsp = subEsp:CreateGroupbox("ESP Overlays", "Left")
 gbEsp:AddToggle("Master ESP", Config.Esp.Enabled, {
+    HasKeybind = true,
     Callback = function(val) Config.Esp.Enabled = val end,
 })
 gbEsp:AddToggle("Boxes", Config.Esp.Boxes, {
@@ -3356,12 +3361,14 @@ local subSurvival = charTab:CreateSubtab("Survival")
 
 local gbLoco = subLocomotion:CreateGroupbox("Movement Physics", "Left")
 gbLoco:AddToggle("Speed Hack", Config.Character.SpeedHack, {
+    HasKeybind = true,
     Callback = function(val) Config.Character.SpeedHack = val end,
 })
 gbLoco:AddSlider("Speed Multiplier", 1, 10, 2.5, "x", function(val)
     Config.Character.SpeedMultiplier = val
 end)
 gbLoco:AddToggle("Bunny Hop (Auto Jump)", Config.Character.BunnyHop, {
+    HasKeybind = true,
     Callback = function(val) Config.Character.BunnyHop = val end,
 })
 
@@ -3376,6 +3383,7 @@ gbSurv:AddToggle("Anti Fall Damage", Config.Character.AntiFallDamage, {
     Callback = function(val) Config.Character.AntiFallDamage = val end,
 })
 gbSurv:AddToggle("Anti-Kill / Suicide Block", Config.Misc.PreventKill, {
+    HasKeybind = true,
     Callback = function(val) Config.Misc.PreventKill = val end,
 })
 
@@ -3388,6 +3396,7 @@ local subEngine = miscTab:CreateSubtab("Presets")
 
 local gbCam = subCamera:CreateGroupbox("3rd Person Camera", "Left")
 gbCam:AddToggle("Enable 3rd Person View", Config.Camera.ThirdPerson, {
+    HasKeybind = true,
     Callback = function(val) Config.Camera.ThirdPerson = val end,
 })
 gbCam:AddSlider("Camera Distance", 5, 30, Config.Camera.ThirdPersonDistance, " studs", function(val)
@@ -3436,6 +3445,22 @@ gbPresets:AddButton("Load Rage Profile", function()
     Config.Character.SpeedHack = true
     Config.Character.SpeedMultiplier = 3.5
     Library.Notify("Rage profile applied")
+end)
+
+local setTab = Window:CreateTab("Settings")
+local subMenu = setTab:CreateSubtab("Menu")
+local gbMenu = subMenu:CreateGroupbox("Interface", "Left")
+gbMenu:AddKeybind("Menu Key", Enum.KeyCode.RightShift, function(key)
+    Window:SetToggleKey(key or Enum.KeyCode.RightShift)
+end)
+gbMenu:AddToggle("Keybind List", true, {
+    Callback = function(val)
+        Library.BindHudEnabled = val
+        Library.RefreshBinds()
+    end,
+})
+gbMenu:AddButton("Unload Menu", function()
+    Window.ScreenGui:Destroy()
 end)
 
 Library.Notify("Sniper Arena loaded - RightShift toggles the menu", 4)
