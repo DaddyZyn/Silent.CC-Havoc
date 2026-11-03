@@ -50,6 +50,8 @@ local hasDrawing = typeof(DrawingLib) == "table" and typeof(DrawingLib.new) == "
 local hookmeta = getGlobal("hookmetamethod")
 local hookfn = getGlobal("hookfunction")
 local newccl = getGlobal("newcclosure") or function(f) return f end
+local checkcallerFn = getGlobal("checkcaller")
+local function isOwnCall() return typeof(checkcallerFn) == "function" and checkcallerFn() end
 local gethui = getGlobal("gethui")
 local mousemoverel = getGlobal("mousemoverel")
 
@@ -283,10 +285,14 @@ local function scanEntities()
     end
 
     local function scanRecursively(container, depth)
-        if depth > 3 or not container then return end
+        if depth > 5 or not container then return end
         for _, child in ipairs(container:GetChildren()) do
             if child:IsA("Model") then
-                checkModel(child)
+                if child:FindFirstChildOfClass("Humanoid") or child:FindFirstChild("HumanoidRootPart") then
+                    checkModel(child)
+                else
+                    scanRecursively(child, depth + 1)
+                end
             elseif child:IsA("Folder") or child:IsA("Configuration") then
                 scanRecursively(child, depth + 1)
             end
@@ -449,7 +455,7 @@ end
 
 task.spawn(function()
     while true do
-        task.wait(2)
+        task.wait(4)
         if Config.Loot.Enabled then
             pcall(scanWorldLoot)
         end
@@ -529,13 +535,13 @@ if typeof(hookmeta) == "function" then
             end
 
             -- 4. Raycast Redirection (Penetrates Map Walls towards Target)
-            if (method == "Raycast" or method == "raycast") and self == Workspace then
+            if (method == "Raycast" or method == "raycast") and self == Workspace and not isOwnCall() then
                 if (Config.SilentAim.Enabled or Config.SilentAim.Wallbang) and currentSilentTargetBone then
                     local hitChance = Config.SilentAim.Wallbang and (Config.SilentAim.WallbangHitRate or 100) or Config.SilentAim.HitRate
                     if math.random(1, 100) <= hitChance then
                         local origin = args[1]
                         local direction = args[2]
-                        if typeof(origin) == "Vector3" and typeof(direction) == "Vector3" then
+                        if typeof(origin) == "Vector3" and typeof(direction) == "Vector3" and direction.Magnitude >= 100 then
                             local targetPos = currentSilentTargetBone.Position
                             args[2] = (targetPos - origin).Unit * direction.Magnitude
                             return oldNamecall(self, unpack(args))
@@ -553,10 +559,10 @@ if typeof(hookfn) == "function" and typeof(Workspace.Raycast) == "function" then
     pcall(function()
         local oldRaycast
         oldRaycast = hookfn(Workspace.Raycast, newccl(function(self, origin, direction, params)
-            if (Config.SilentAim.Enabled or Config.SilentAim.Wallbang) and currentSilentTargetBone then
+            if (Config.SilentAim.Enabled or Config.SilentAim.Wallbang) and currentSilentTargetBone and not isOwnCall() then
                 local hitChance = Config.SilentAim.Wallbang and (Config.SilentAim.WallbangHitRate or 100) or Config.SilentAim.HitRate
                 if math.random(1, 100) <= hitChance then
-                    if typeof(origin) == "Vector3" and typeof(direction) == "Vector3" then
+                    if typeof(origin) == "Vector3" and typeof(direction) == "Vector3" and direction.Magnitude >= 100 then
                         local targetPos = currentSilentTargetBone.Position
                         local newDir = (targetPos - origin).Unit * direction.Magnitude
                         return oldRaycast(self, origin, newDir, params)
@@ -3550,6 +3556,13 @@ RunService.RenderStepped:Connect(function()
     local useDrawing = (Config.Esp.Engine == "Auto (Dual Layer)" or Config.Esp.Engine == "Drawing (2D)") and hasDrawing
     local useBillboard = (Config.Esp.Engine == "Auto (Dual Layer)" or Config.Esp.Engine == "Billboard (Native)" or not hasDrawing)
 
+    for model in pairs(DrawingEspPool) do
+        if not ActiveEntities[model] then cleanupModelEsp(model) end
+    end
+    for model in pairs(BillboardEspPool) do
+        if not ActiveEntities[model] then cleanupModelEsp(model) end
+    end
+
     for model, ent in pairs(ActiveEntities) do
         local isAlive = isLivingCharacter(model)
         if not isAlive or not model.Parent or not ent.HRP.Parent then
@@ -3995,7 +4008,7 @@ RunService.Heartbeat:Connect(function()
         hrp.AssemblyLinearVelocity = Vector3.new(moveDir.X * maxAllowedSpeed, currentVel.Y, moveDir.Z * maxAllowedSpeed)
 
     -- 3. Hard Velocity Budget Clamp (Prevents Havoc >21 studs/s packet drop)
-    else
+    elseif Config.Character.SpeedOverride or Config.Character.NoClip then
         if horizVec.Magnitude > 20.4 then
             local clamped = horizVec.Unit * 20.4
             hrp.AssemblyLinearVelocity = Vector3.new(clamped.X, currentVel.Y, clamped.Y)
@@ -4022,12 +4035,16 @@ end)
 -- =========================================================================
 -- SECTION 11: HAVOC ENGINE MEMORY PATCHER (REALISM, STAMINA & BASECAMERA)
 -- =========================================================================
+local lockpickOrig, interactOrig
 task.spawn(function()
     local getgc_fn = getgc or (getgenv and getgenv().getgc)
+    local gcTick = 0
     while true do
         task.wait(0.5)
+        gcTick = gcTick + 1
+        local needGc = Config.Character.NoRecoil or Config.Misc.NoRecoil or Config.Character.AntiFallDamage or Config.Misc.AntiFallDamage or Config.Character.InfiniteStamina or Config.Misc.InfiniteStamina
         pcall(function()
-            if typeof(getgc_fn) == "function" then
+            if needGc and gcTick % 10 == 1 and typeof(getgc_fn) == "function" then
                 for _, obj in ipairs(getgc_fn(true)) do
                     if type(obj) == "table" then
                         -- Realism Table: recoilReductionRatio & fallDamage
@@ -4072,11 +4089,19 @@ task.spawn(function()
                         end
                         -- Instant Lockpick Exploit
                         if Config.Exploits.InstantLockpick and typeof(env.handleLockpick) == "function" then
+                            lockpickOrig = lockpickOrig or env.handleLockpick
                             env.handleLockpick = function(...) return true end
+                        elseif lockpickOrig and not Config.Exploits.InstantLockpick then
+                            env.handleLockpick = lockpickOrig
+                            lockpickOrig = nil
                         end
                         -- Fast / Instant Interact Exploit
                         if Config.Exploits.InstantInteract and typeof(env.createLoadingIconInteract) == "function" then
+                            interactOrig = interactOrig or env.createLoadingIconInteract
                             env.createLoadingIconInteract = function(...) return end
+                        elseif interactOrig and not Config.Exploits.InstantInteract then
+                            env.createLoadingIconInteract = interactOrig
+                            interactOrig = nil
                         end
                         -- Overweight & Loot Weight Nullification
                         if (Config.Character.ZeroWeight or Config.Misc.ZeroWeight) then
