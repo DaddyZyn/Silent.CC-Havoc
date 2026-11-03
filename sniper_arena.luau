@@ -611,9 +611,10 @@ function Library.CreateWindow(config)
     -- Keybind list HUD (shows enabled features that have a key)
     local bindHud = Instance.new("Frame")
     bindHud.Name = "KeybindList"
-    bindHud.AutomaticSize = Enum.AutomaticSize.Y
-    bindHud.Size = UDim2.new(0, 170, 0, 0)
-    bindHud.Position = UDim2.new(1, -182, 0, 12)
+    bindHud.Size = UDim2.new(0, 0, 0, 0)
+    bindHud.AutomaticSize = Enum.AutomaticSize.XY
+    bindHud.AnchorPoint = Vector2.new(1, 0)
+    bindHud.Position = UDim2.new(1, -12, 0, 12)
     bindHud.BackgroundColor3 = Library.Theme.WindowBg
     bindHud.BackgroundTransparency = 0.1
     bindHud.BorderSizePixel = 0
@@ -665,7 +666,8 @@ function Library.CreateWindow(config)
             if key and b.GetState() then
                 shown = shown + 1
                 local row = Instance.new("TextLabel")
-                row.Size = UDim2.new(1, 0, 0, 14)
+                row.Size = UDim2.new(0, 0, 0, 14)
+                row.AutomaticSize = Enum.AutomaticSize.X
                 row.LayoutOrder = i
                 row.BackgroundTransparency = 1
                 row.Font = Library.Theme.FontBody
@@ -673,7 +675,7 @@ function Library.CreateWindow(config)
                 row.TextColor3 = Library.Theme.LabelText
                 row.TextXAlignment = Enum.TextXAlignment.Left
                 row.RichText = true
-                local name = typeof(key) == "EnumItem" and key.Name or tostring(key)
+                local name = typeof(key) == "EnumItem" and key.Name:gsub("MouseButton", "MB") or tostring(key)
                 row.Text = string.format("%s  <font color=\"rgb(120,190,255)\">[%s]</font>", b.Label, name)
                 row.ZIndex = 9401
                 row.Parent = bindHud
@@ -814,13 +816,13 @@ function Library.CreateWindow(config)
 
         local subBaseline = Instance.new("Frame")
         subBaseline.Name = "Baseline"
-        subBaseline.AnchorPoint = Vector2.new(0, 1)
-        subBaseline.Position = UDim2.new(0, 0, 1, 0)
+        subBaseline.Position = UDim2.new(0, 0, 0, 35)
         subBaseline.Size = UDim2.new(1, 0, 0, 1)
         subBaseline.BackgroundColor3 = Library.Theme.GroupboxBorder
         subBaseline.BorderSizePixel = 0
         subBaseline.ZIndex = 49
-        subBaseline.Parent = subtabBar
+        subBaseline.Visible = false
+        subBaseline.Parent = tabContainer
 
         local subLayout = Instance.new("UIListLayout")
         subLayout.FillDirection = Enum.FillDirection.Horizontal
@@ -1026,6 +1028,7 @@ function Library.CreateWindow(config)
                 hasSubtabs = true
                 columns.Visible = false
                 subtabBar.Visible = true
+                subBaseline.Visible = true
                 -- Offset the scrolling pane below the fixed top navbar
                 tabContent.Position = UDim2.new(0, 0, 0, 36)
                 tabContent.Size = UDim2.new(1, 0, 1, -36)
@@ -2862,8 +2865,14 @@ RunService.RenderStepped:Connect(function()
             end
             
             -- Bunny Hop
-            if Config.Character.BunnyHop and hum.FloorMaterial ~= Enum.Material.Air and hum.MoveDirection.Magnitude > 0.1 then
-                hum.Jump = true
+            if Config.Character.BunnyHop and not isMenuVisible and not UserInputService:GetFocusedTextBox()
+                and UserInputService:IsKeyDown(Enum.KeyCode.Space)
+                and hum.FloorMaterial ~= Enum.Material.Air and hum:GetState() ~= Enum.HumanoidStateType.Jumping then
+                hum:ChangeState(Enum.HumanoidStateType.Jumping)
+                local v = hrp.AssemblyLinearVelocity
+                if v.Y < 10 then
+                    hrp.AssemblyLinearVelocity = Vector3.new(v.X, math.max(hum.UseJumpPower and hum.JumpPower or 50, 40), v.Z)
+                end
             end
         end
     end
@@ -2935,7 +2944,7 @@ local R6_BONES = {
 
 local ESPMap = {}
 RunService.RenderStepped:Connect(function()
-    if not Config.Esp.Enabled then
+    if not Config.Esp.Enabled or isMenuVisible then
         for _, esp in pairs(ESPMap) do
             esp.Box.Visible = false
             esp.Name.Visible = false
