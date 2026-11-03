@@ -175,48 +175,50 @@ local Config = {
 -- =========================================================================
 local Library = {}
 Library.Theme = {
-    WindowBg = Color3.fromRGB(10, 10, 12),
+    WindowBg = Color3.fromRGB(9, 11, 17),
     WindowBorder = Color3.fromRGB(0, 0, 0),
-    WindowStroke = Color3.fromRGB(32, 32, 38),
-    WindowGlow = Color3.fromRGB(255, 255, 255),
+    WindowStroke = Color3.fromRGB(28, 36, 54),
+    WindowGlow = Color3.fromRGB(140, 200, 255),
 
-    SidebarBg = Color3.fromRGB(8, 8, 10),
-    SidebarBorder = Color3.fromRGB(22, 22, 26),
+    SidebarBg = Color3.fromRGB(7, 9, 14),
+    SidebarBorder = Color3.fromRGB(22, 28, 42),
 
-    TitlebarBg = Color3.fromRGB(8, 8, 10),
-    TitlebarText = Color3.fromRGB(245, 245, 250),
+    TitlebarBg = Color3.fromRGB(7, 9, 14),
+    TitlebarText = Color3.fromRGB(240, 246, 255),
 
-    NavbarBg = Color3.fromRGB(8, 8, 10),
-    TabActiveBg = Color3.fromRGB(20, 20, 24),
-    TabActiveBorder = Color3.fromRGB(46, 74, 120),
-    TabInactiveText = Color3.fromRGB(130, 130, 142),
+    NavbarBg = Color3.fromRGB(7, 9, 14),
+    TabActiveBg = Color3.fromRGB(16, 22, 34),
+    TabActiveBorder = Color3.fromRGB(44, 70, 110),
+    TabInactiveText = Color3.fromRGB(122, 134, 156),
     TabActiveText = Color3.fromRGB(255, 255, 255),
-    TabHoverBg = Color3.fromRGB(14, 14, 18),
+    TabHoverBg = Color3.fromRGB(13, 18, 28),
 
-    Accent = Color3.fromRGB(86, 156, 255),
-    AccentGlow = Color3.fromRGB(120, 180, 255),
-    AccentDim = Color3.fromRGB(60, 110, 190),
-    AccentSecondary = Color3.fromRGB(150, 120, 255),
+    Accent = Color3.fromRGB(120, 190, 255),
+    AccentGlow = Color3.fromRGB(180, 220, 255),
+    AccentDim = Color3.fromRGB(60, 110, 180),
+    AccentSecondary = Color3.fromRGB(205, 232, 255),
 
-    GroupboxBg = Color3.fromRGB(13, 13, 16),
-    GroupboxBorder = Color3.fromRGB(26, 26, 32),
-    GroupboxTitle = Color3.fromRGB(235, 235, 240),
+    GroupboxBg = Color3.fromRGB(12, 15, 23),
+    GroupboxBorder = Color3.fromRGB(24, 31, 46),
+    GroupboxTitle = Color3.fromRGB(225, 238, 255),
 
-    LabelText = Color3.fromRGB(200, 200, 208),
-    MutedText = Color3.fromRGB(120, 120, 132),
+    LabelText = Color3.fromRGB(196, 206, 224),
+    MutedText = Color3.fromRGB(110, 122, 146),
     WarnText = Color3.fromRGB(255, 95, 95),
 
-    InputBg = Color3.fromRGB(8, 8, 10),
-    InputBorder = Color3.fromRGB(30, 30, 36),
+    InputBg = Color3.fromRGB(7, 9, 14),
+    InputBorder = Color3.fromRGB(30, 38, 56),
 
-    SliderTrack = Color3.fromRGB(16, 16, 20),
-    SliderFill = Color3.fromRGB(86, 156, 255),
-    SliderText = Color3.fromRGB(250, 250, 255),
+    SliderTrack = Color3.fromRGB(16, 21, 32),
+    SliderFill = Color3.fromRGB(120, 190, 255),
+    SliderText = Color3.fromRGB(240, 246, 255),
 
-    FontTitle = Enum.Font.GothamMedium,
+    FontTitle = Enum.Font.GothamBold,
     FontTab = Enum.Font.GothamMedium,
-    FontBody = Enum.Font.RobotoMono,
+    FontBody = Enum.Font.GothamMedium,
 }
+
+Library.Binds = {}
 
 local function getSafeParent()
     if typeof(gethui) == "function" then
@@ -360,7 +362,9 @@ function Library.CreateWindow(config)
     titleLabel.TextSize = 15
     titleLabel.TextColor3 = Library.Theme.TitlebarText
     titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    titleLabel.Text = "snow.cc"
+    titleLabel.RichText = true
+    titleLabel.TextSize = 17
+    titleLabel.Text = '<font color="rgb(255,255,255)">snow</font><font color="rgb(120,190,255)">.cc</font>'
     titleLabel.Parent = titleBar
 
     local gameLabel = Instance.new("TextLabel")
@@ -604,6 +608,81 @@ function Library.CreateWindow(config)
         end)
     end
 
+    -- Keybind list HUD (shows enabled features that have a key)
+    local bindHud = Instance.new("Frame")
+    bindHud.Name = "KeybindList"
+    bindHud.AutomaticSize = Enum.AutomaticSize.Y
+    bindHud.Size = UDim2.new(0, 170, 0, 0)
+    bindHud.Position = UDim2.new(1, -182, 0, 12)
+    bindHud.BackgroundColor3 = Library.Theme.WindowBg
+    bindHud.BackgroundTransparency = 0.1
+    bindHud.BorderSizePixel = 0
+    bindHud.Visible = false
+    bindHud.ZIndex = 9400
+    bindHud.Parent = screenGui
+
+    local bhCorner = Instance.new("UICorner")
+    bhCorner.CornerRadius = UDim.new(0, 5)
+    bhCorner.Parent = bindHud
+
+    local bhStroke = Instance.new("UIStroke")
+    bhStroke.Color = Library.Theme.Accent
+    bhStroke.Transparency = 0.55
+    bhStroke.Parent = bindHud
+
+    local bhPad = Instance.new("UIPadding")
+    bhPad.PaddingTop = UDim.new(0, 6)
+    bhPad.PaddingBottom = UDim.new(0, 6)
+    bhPad.PaddingLeft = UDim.new(0, 10)
+    bhPad.PaddingRight = UDim.new(0, 10)
+    bhPad.Parent = bindHud
+
+    local bhLayout = Instance.new("UIListLayout")
+    bhLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    bhLayout.Padding = UDim.new(0, 3)
+    bhLayout.Parent = bindHud
+
+    local bhTitle = Instance.new("TextLabel")
+    bhTitle.Size = UDim2.new(1, 0, 0, 14)
+    bhTitle.LayoutOrder = 0
+    bhTitle.BackgroundTransparency = 1
+    bhTitle.Font = Enum.Font.GothamBold
+    bhTitle.TextSize = 11
+    bhTitle.TextColor3 = Library.Theme.Accent
+    bhTitle.TextXAlignment = Enum.TextXAlignment.Left
+    bhTitle.Text = "KEYBINDS"
+    bhTitle.ZIndex = 9401
+    bhTitle.Parent = bindHud
+
+    local bindRows = {}
+    Library.BindHudEnabled = true
+    function Library.RefreshBinds()
+        for _, r in ipairs(bindRows) do r:Destroy() end
+        table.clear(bindRows)
+        local shown = 0
+        for i, b in ipairs(Library.Binds) do
+            local key = b.GetKey()
+            if key and b.GetState() then
+                shown = shown + 1
+                local row = Instance.new("TextLabel")
+                row.Size = UDim2.new(1, 0, 0, 14)
+                row.LayoutOrder = i
+                row.BackgroundTransparency = 1
+                row.Font = Library.Theme.FontBody
+                row.TextSize = 11
+                row.TextColor3 = Library.Theme.LabelText
+                row.TextXAlignment = Enum.TextXAlignment.Left
+                row.RichText = true
+                local name = typeof(key) == "EnumItem" and key.Name or tostring(key)
+                row.Text = string.format("%s  <font color=\"rgb(120,190,255)\">[%s]</font>", b.Label, name)
+                row.ZIndex = 9401
+                row.Parent = bindHud
+                table.insert(bindRows, row)
+            end
+        end
+        bindHud.Visible = Library.BindHudEnabled and shown > 0
+    end
+
     -- Watermark (name | game | fps | ping)
     local watermark = Instance.new("Frame")
     watermark.Name = "Watermark"
@@ -650,12 +729,13 @@ function Library.CreateWindow(config)
             frames, lastWm = 0, now
             local ping = 0
             pcall(function() ping = math.floor(LocalPlayer:GetNetworkPing() * 2000) end)
-            wmLabel.Text = string.format('<font color="rgb(86,156,255)">snow.cc</font>  |  %s  |  %d fps  |  %d ms', gameName, fps, ping)
+            wmLabel.Text = string.format('<font color="rgb(120,190,255)">snow.cc</font>  |  %s  |  %d fps  |  %d ms', gameName, fps, ping)
         end
     end)
 
     local Window = {
         Watermark = watermark,
+        SetToggleKey = function(_, k) toggleKey = k or toggleKey end,
         ScreenGui = screenGui,
         MainFrame = mainFrame,
         PopupOverlay = popupOverlay,
@@ -731,6 +811,16 @@ function Library.CreateWindow(config)
         subtabBar.Visible = false
         subtabBar.ZIndex = 50
         subtabBar.Parent = tabContainer
+
+        local subBaseline = Instance.new("Frame")
+        subBaseline.Name = "Baseline"
+        subBaseline.AnchorPoint = Vector2.new(0, 1)
+        subBaseline.Position = UDim2.new(0, 0, 1, 0)
+        subBaseline.Size = UDim2.new(1, 0, 0, 1)
+        subBaseline.BackgroundColor3 = Library.Theme.GroupboxBorder
+        subBaseline.BorderSizePixel = 0
+        subBaseline.ZIndex = 49
+        subBaseline.Parent = subtabBar
 
         local subLayout = Instance.new("UIListLayout")
         subLayout.FillDirection = Enum.FillDirection.Horizontal
@@ -947,7 +1037,7 @@ function Library.CreateWindow(config)
             subBtn.Name = string.format("SubTab_%02d_%s", subIdx, subName)
             subBtn.Size = UDim2.new(0, 0, 1, 0)
             subBtn.AutomaticSize = Enum.AutomaticSize.X
-            subBtn.BackgroundColor3 = Color3.fromRGB(13, 13, 16)
+            subBtn.BackgroundTransparency = 1
             subBtn.BorderSizePixel = 0
             subBtn.AutoButtonColor = false
             subBtn.Font = Library.Theme.FontTab
@@ -963,15 +1053,41 @@ function Library.CreateWindow(config)
             sPad.PaddingRight = UDim.new(0, 16)
             sPad.Parent = subBtn
 
-            local sCorner = Instance.new("UICorner")
-            sCorner.CornerRadius = UDim.new(0, 4)
-            sCorner.Parent = subBtn
+            local sStroke = { Color = Library.Theme.Accent }
 
-            local sStroke = Instance.new("UIStroke")
-            sStroke.Color = Color3.fromRGB(32, 32, 38)
-            sStroke.Thickness = 1
-            sStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-            sStroke.Parent = subBtn
+            local underGlow = Instance.new("Frame")
+            underGlow.Name = "UnderlineGlow"
+            underGlow.AnchorPoint = Vector2.new(0.5, 1)
+            underGlow.Position = UDim2.new(0.5, 0, 1, 1)
+            underGlow.Size = UDim2.new(0, 0, 0, 9)
+            underGlow.BackgroundColor3 = Library.Theme.Accent
+            underGlow.BackgroundTransparency = 1
+            underGlow.BorderSizePixel = 0
+            underGlow.ZIndex = 50
+            underGlow.Parent = subBtn
+
+            local ugCorner = Instance.new("UICorner")
+            ugCorner.CornerRadius = UDim.new(1, 0)
+            ugCorner.Parent = underGlow
+
+            local ugGrad = Instance.new("UIGradient")
+            ugGrad.Rotation = 90
+            ugGrad.Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, 1),
+                NumberSequenceKeypoint.new(1, 0.35),
+            })
+            ugGrad.Parent = underGlow
+
+            local underline = Instance.new("Frame")
+            underline.Name = "Underline"
+            underline.AnchorPoint = Vector2.new(0.5, 1)
+            underline.Position = UDim2.new(0.5, 0, 1, 0)
+            underline.Size = UDim2.new(0, 0, 0, 2)
+            underline.BackgroundColor3 = Library.Theme.AccentGlow
+            underline.BackgroundTransparency = 1
+            underline.BorderSizePixel = 0
+            underline.ZIndex = 52
+            underline.Parent = subBtn
 
             local subCols = Instance.new("Frame")
             subCols.Name = "Columns_" .. subName
@@ -1019,26 +1135,20 @@ function Library.CreateWindow(config)
                 Right = sRight,
             }
 
+            local barTween = TweenInfo.new(0.22, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
             local function setSubActive(active)
-                if active then
-                    subCols.Visible = true
-                    TweenService:Create(subBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-                        BackgroundColor3 = Color3.fromRGB(24, 24, 30),
-                        TextColor3 = Color3.fromRGB(255, 255, 255)
-                    }):Play()
-                    TweenService:Create(sStroke, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-                        Color = Library.Theme.Accent
-                    }):Play()
-                else
-                    subCols.Visible = false
-                    TweenService:Create(subBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-                        BackgroundColor3 = Color3.fromRGB(13, 13, 16),
-                        TextColor3 = Library.Theme.TabInactiveText
-                    }):Play()
-                    TweenService:Create(sStroke, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-                        Color = Color3.fromRGB(30, 30, 36)
-                    }):Play()
-                end
+                subCols.Visible = active
+                TweenService:Create(subBtn, barTween, {
+                    TextColor3 = active and Color3.fromRGB(255, 255, 255) or Library.Theme.TabInactiveText
+                }):Play()
+                TweenService:Create(underline, barTween, {
+                    Size = active and UDim2.new(1, -16, 0, 2) or UDim2.new(0, 0, 0, 2),
+                    BackgroundTransparency = active and 0 or 1
+                }):Play()
+                TweenService:Create(underGlow, barTween, {
+                    Size = active and UDim2.new(1, -8, 0, 9) or UDim2.new(0, 0, 0, 9),
+                    BackgroundTransparency = active and 0.45 or 1
+                }):Play()
             end
 
             subBtn.MouseButton1Click:Connect(function()
@@ -1050,14 +1160,12 @@ function Library.CreateWindow(config)
 
             subBtn.MouseEnter:Connect(function()
                 if currentSubtab ~= subObj then
-                    TweenService:Create(sStroke, TweenInfo.new(0.12), { Color = Color3.fromRGB(56, 56, 68) }):Play()
-                    TweenService:Create(subBtn, TweenInfo.new(0.12), { TextColor3 = Color3.fromRGB(210, 210, 220) }):Play()
+                    TweenService:Create(subBtn, TweenInfo.new(0.12), { TextColor3 = Color3.fromRGB(215, 228, 245) }):Play()
                 end
             end)
 
             subBtn.MouseLeave:Connect(function()
                 if currentSubtab ~= subObj then
-                    TweenService:Create(sStroke, TweenInfo.new(0.12), { Color = Color3.fromRGB(30, 30, 36) }):Play()
                     TweenService:Create(subBtn, TweenInfo.new(0.12), { TextColor3 = Library.Theme.TabInactiveText }):Play()
                 end
             end)
@@ -1112,11 +1220,11 @@ function Library.CreateWindow(config)
             groupTitle.Size = UDim2.new(1, -16, 0, 22)
             groupTitle.Position = UDim2.new(0, 10, 0, 4)
             groupTitle.BackgroundTransparency = 1
-            groupTitle.Font = Enum.Font.RobotoMono
-            groupTitle.TextSize = 12
+            groupTitle.Font = Enum.Font.GothamBold
+            groupTitle.TextSize = 11
             groupTitle.TextColor3 = Library.Theme.GroupboxTitle
             groupTitle.TextXAlignment = Enum.TextXAlignment.Left
-            groupTitle.Text = groupTitleText
+            groupTitle.Text = string.upper(groupTitleText)
             groupTitle.Parent = groupbox
 
             local itemsContainer = Instance.new("Frame")
@@ -1204,7 +1312,7 @@ function Library.CreateWindow(config)
                 textBtn.Size = UDim2.new(1, -55, 1, 0)
                 textBtn.Position = UDim2.new(0, 22, 0, 0)
                 textBtn.BackgroundTransparency = 1
-                textBtn.Font = Enum.Font.RobotoMono
+                textBtn.Font = Library.Theme.FontBody
                 textBtn.TextSize = 11
                 textBtn.TextColor3 = state and Color3.fromRGB(255, 255, 255) or Library.Theme.LabelText
                 textBtn.TextXAlignment = Enum.TextXAlignment.Left
@@ -1217,9 +1325,10 @@ function Library.CreateWindow(config)
                     textBtn.TextColor3 = state and Color3.fromRGB(255, 255, 255) or Library.Theme.LabelText
                 end
 
-                if keybind ~= nil or onKeyChanged ~= nil then
-                    local currentKey = keybind
-                    local listening = false
+                local currentKey = keybind
+                local listening = false
+                local toggleState
+                if keybind ~= nil or onKeyChanged ~= nil or (options and options.HasKeybind) then
                     local listenStartTime = 0
 
                     local keybindBtn = Instance.new("TextButton")
@@ -1228,7 +1337,7 @@ function Library.CreateWindow(config)
                     keybindBtn.Position = UDim2.new(1, -42, 0.5, -8)
                     keybindBtn.BackgroundColor3 = Library.Theme.InputBg
                     keybindBtn.BorderSizePixel = 0
-                    keybindBtn.Font = Enum.Font.RobotoMono
+                    keybindBtn.Font = Library.Theme.FontBody
                     keybindBtn.TextSize = 10
                     keybindBtn.TextColor3 = Library.Theme.MutedText
                     keybindBtn.Text = formatKeyName(currentKey)
@@ -1276,15 +1385,31 @@ function Library.CreateWindow(config)
                             keybindBtn.TextColor3 = Library.Theme.MutedText
                             listening = false
                             if onKeyChanged then pcall(onKeyChanged, currentKey) end
+                            if Library.RefreshBinds then Library.RefreshBinds() end
                         end
                     end)
                 end
 
-                local function toggleState()
+                toggleState = function()
                     state = not state
                     paintToggle()
                     if callback then pcall(callback, state) end
+                    if Library.RefreshBinds then Library.RefreshBinds() end
                 end
+
+                local bindEntry = {
+                    Label = label,
+                    GetState = function() return state end,
+                    GetKey = function() return currentKey end,
+                }
+                table.insert(Library.Binds, bindEntry)
+
+                UserInputService.InputBegan:Connect(function(input, gpe)
+                    if gpe or listening or not currentKey then return end
+                    if input.KeyCode == currentKey or input.UserInputType == currentKey then
+                        toggleState()
+                    end
+                end)
 
                 box.MouseButton1Click:Connect(toggleState)
                 textBtn.MouseButton1Click:Connect(toggleState)
@@ -1294,6 +1419,7 @@ function Library.CreateWindow(config)
                         state = newVal
                         paintToggle()
                         if callback then pcall(callback, state) end
+                        if Library.RefreshBinds then Library.RefreshBinds() end
                     end,
                     GetValue = function() return state end,
                 }
@@ -1316,7 +1442,7 @@ function Library.CreateWindow(config)
                 labelText.Name = "Label"
                 labelText.Size = UDim2.new(1, -50, 1, 0)
                 labelText.BackgroundTransparency = 1
-                labelText.Font = Enum.Font.RobotoMono
+                labelText.Font = Library.Theme.FontBody
                 labelText.TextSize = 11
                 labelText.TextColor3 = Library.Theme.LabelText
                 labelText.TextXAlignment = Enum.TextXAlignment.Left
@@ -1329,7 +1455,7 @@ function Library.CreateWindow(config)
                 keyBtn.Position = UDim2.new(1, -42, 0.5, -9)
                 keyBtn.BackgroundColor3 = Library.Theme.InputBg
                 keyBtn.BorderSizePixel = 0
-                keyBtn.Font = Enum.Font.RobotoMono
+                keyBtn.Font = Library.Theme.FontBody
                 keyBtn.TextSize = 10
                 keyBtn.TextColor3 = Library.Theme.MutedText
                 keyBtn.Text = formatKeyName(currentKey)
@@ -2284,7 +2410,7 @@ function Library.CreateWindow(config)
                 lbl.Size = UDim2.new(1, 0, 0, 18)
                 lbl.AutomaticSize = Enum.AutomaticSize.Y
                 lbl.BackgroundTransparency = 1
-                lbl.Font = Enum.Font.RobotoMono
+                lbl.Font = Library.Theme.FontBody
                 lbl.TextSize = 10
                 lbl.TextColor3 = Library.Theme.MutedText
                 lbl.TextXAlignment = Enum.TextXAlignment.Left
@@ -2302,7 +2428,7 @@ function Library.CreateWindow(config)
                 btn.Size = UDim2.new(1, 0, 0, 24)
                 btn.BackgroundColor3 = Library.Theme.InputBg
                 btn.BorderSizePixel = 0
-                btn.Font = Enum.Font.RobotoMono
+                btn.Font = Library.Theme.FontBody
                 btn.TextSize = 11
                 btn.TextColor3 = Library.Theme.LabelText
                 btn.Text = label
