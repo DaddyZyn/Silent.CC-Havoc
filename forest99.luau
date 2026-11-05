@@ -2445,7 +2445,10 @@ end
 
 local PASSIVE = { "bunny", "frog" }
 local function lname(m) return string.lower(m.Name) end
-local function isKid(m) return lname(m):find("lost child", 1, true) ~= nil or lname(m):find("kid", 1, true) ~= nil end
+local function isKid(m)
+    local n = lname(m)
+    return n:find("lost child", 1, true) ~= nil or n:find("kid", 1, true) ~= nil or n:find("salesman", 1, true) ~= nil
+end
 local function isDeer(m) return lname(m):find("deer", 1, true) ~= nil end
 local function isPassive(m)
     local n = lname(m)
@@ -2495,8 +2498,36 @@ local function findNamed(key, patterns, roots)
     return nil
 end
 
+local CollectionService = game:GetService("CollectionService")
 local function findCampfire()
-    return findNamed("camp", { "campfire", "main fire", "mainfire" }, { Workspace:FindFirstChild("Map"), Workspace })
+    local cached = nameCache.camp
+    if cached and cached.Parent then return cached end
+    for _, tag in ipairs({ "MainFire", "Campfire", "FireSource", "Fire" }) do
+        local ok, list = pcall(CollectionService.GetTagged, CollectionService, tag)
+        if ok and list[1] and list[1]:IsA("Model") then
+            nameCache.camp = list[1]
+            return list[1]
+        end
+    end
+    local map = Workspace:FindFirstChild("Map")
+    local camp = map and map:FindFirstChild("Campground")
+    if camp then
+        for _, d in ipairs(camp:GetDescendants()) do
+            if d:IsA("Fire") or (d:IsA("ParticleEmitter") and string.lower(d.Name):find("fire", 1, true)) then
+                local m = d:FindFirstAncestorOfClass("Model")
+                if m and m ~= camp then
+                    nameCache.camp = m
+                    return m
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function findSawmills()
+    local ok, list = pcall(CollectionService.GetTagged, CollectionService, "LoggingCamp")
+    return ok and list or {}
 end
 
 local function equippedToolName()
@@ -2603,13 +2634,23 @@ local function auraAllowed(m)
     return true
 end
 
-local function hit(target)
-    if F.AuraArgs == "(target, damage)" then
-        invoke("ToolDamageObject", target, F.AuraDamage)
-    else
-        local r = getRoot()
-        invoke("ToolDamageObject", target, equippedToolName(), tostring(math.floor(os.clock() * 1000)), r and r.CFrame)
+local function findEquippedTool()
+    local name = equippedToolName()
+    local c = getChar()
+    if c then
+        for _, t in ipairs(c:GetChildren()) do
+            if t:IsA("Tool") and (not name or t.Name == name) then return t end
+        end
     end
+    return nil
+end
+
+-- Real signature (from game scripts): ToolDamageObject:InvokeServer(target, toolModel, damage, hitCFrame)
+local function hit(target)
+    local tool = findEquippedTool()
+    local r = modelRoot(target)
+    if not (tool and r) then return end
+    invoke("ToolDamageObject", target, tool, F.AuraDamage, r.CFrame)
 end
 
 task.spawn(function()
@@ -2661,7 +2702,7 @@ end)
 -- =========================================================================
 -- SURVIVAL
 -- =========================================================================
-local FUEL = { "log", "coal", "biofuel" }
+local FUEL = { "log", "coal", "biofuel", "fuel canister" }
 local function isFuel(name)
     name = string.lower(name)
     for _, f in ipairs(FUEL) do
@@ -2730,7 +2771,9 @@ end)
 task.spawn(function()
     while Running do
         task.wait(1)
-        if F.AutoSawmill then fire("RequestPullSawmillLever") end
+        if F.AutoSawmill then
+            for _, camp in ipairs(findSawmills()) do fire("RequestPullSawmillLever", camp) end
+        end
     end
 end)
 
@@ -2860,7 +2903,7 @@ local function drawEsp(key, root, size, label, color, withBox)
 end
 
 local itemEspList, itemEspT = {}, 0
-local ITEM_PATTERNS = { "skull key", "chest", "pelt", "diamond", "key", "scrap", "gem" }
+local ITEM_PATTERNS = { "key", "chest", "pelt", "diamond", "coin stack", "gem", "medkit", "ammo" }
 local function refreshItemList()
     table.clear(itemEspList)
     if not ItemsFolder then return end
@@ -2992,7 +3035,6 @@ sld(gbAura, "Range", 5, 60, "AuraRange", " studs")
 sld(gbAura, "Damage", 1, 500, "AuraDamage")
 sld(gbAura, "Delay (x10ms)", 5, 100, "AuraDelay")
 gbAura:AddDropdown("Targets", { "Hostile Only", "All", "Deer Only" }, F.AuraMode, function(v) F.AuraMode = v end)
-gbAura:AddDropdown("Damage Args", { "(target, damage)", "(target, tool, id, cframe)" }, F.AuraArgs, function(v) F.AuraArgs = v end)
 local gbTree = subAura:CreateGroupbox("Resources", "Right")
 tog(gbTree, "Tree Chopper", "TreeAura", true)
 sld(gbTree, "Tree Range", 5, 60, "TreeRange", " studs")
@@ -3083,9 +3125,26 @@ tog(gbFly, "Noclip", "NoClip", true)
 tog(gbFly, "Infinite Jump", "InfJump", true)
 local gbTp = subTp:CreateGroupbox("Locations", "Left")
 gbTp:AddButton("Campfire", function() local f = findCampfire() local r = f and modelRoot(f) if r then teleportTo(r.CFrame) Library.Notify("Teleported to Campfire") else Library.Notify("Campfire not found") end end)
-gbTp:AddButton("Trader", function() tpNamed("trader", "Trader", { "trader" }, { Workspace:FindFirstChild("Map"), CharactersFolder }) end)
-gbTp:AddButton("Sawmill", function() tpNamed("sawmill", "Sawmill", { "sawmill" }, { Workspace:FindFirstChild("Map") }) end)
-gbTp:AddButton("Stronghold", function() tpNamed("stronghold", "Stronghold", { "stronghold" }, { Workspace:FindFirstChild("Map") }) end)
+gbTp:AddButton("Trader (Sketchy Salesman)", function()
+    local s = CharactersFolder and CharactersFolder:FindFirstChild("Sketchy Salesman")
+    local r = s and modelRoot(s)
+    if r then teleportTo(r.CFrame) else Library.Notify("Trader not loaded") end
+end)
+gbTp:AddButton("Sawmill", function()
+    local camp = findSawmills()[1]
+    local r = camp and modelRoot(camp)
+    if r then teleportTo(r.CFrame) else Library.Notify("Sawmill not found") end
+end)
+gbTp:AddButton("Stronghold", function()
+    local map = Workspace:FindFirstChild("Map")
+    local s = map and map:FindFirstChild("Landmarks") and map.Landmarks:FindFirstChild("Stronghold")
+    if s then teleportTo(s:GetPivot()) else Library.Notify("Stronghold not found") end
+end)
+gbTp:AddButton("Crafting Bench", function()
+    local map = Workspace:FindFirstChild("Map")
+    local b = map and map:FindFirstChild("Campground") and map.Campground:FindFirstChild("CraftingBench")
+    if b then teleportTo(b:GetPivot()) else Library.Notify("Bench not found") end
+end)
 gbTp:AddButton("Nearest Lost Child", function()
     local r = nearestKid()
     if r then teleportTo(r.CFrame) else Library.Notify("No lost child loaded nearby") end
