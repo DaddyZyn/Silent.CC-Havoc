@@ -2393,7 +2393,8 @@ local F = {
     Spin = false, SpinSpeed = 30, Fling = false, Orbit = false, OrbitSpeed = 3, OrbitDist = 8,
     Spectate = false, ClickTP = false, AntiAFK = true,
     Skeleton = false, HeadDot = false, Chams = false, ChamFill = 5, WireChams = false, Rainbow = false,
-    Crosshair = false, CrossSize = 10, Xray = false, Gravity = 196, GravOn = false,
+    Hump = false, HumpSpeed = 12, HumpReach = 1.5, Headsit = false, Piggy = false, FollowT = false, FlingT = false,
+    Shake = false, LoopTP = false, Crosshair = false, CrossSize = 10, Xray = false, Gravity = 196, GravOn = false,
 }
 local TargetPlayer = nil
 
@@ -2671,6 +2672,44 @@ connect(RunService.Heartbeat, function(dt)
     end
 end)
 
+local humpT, flingT = 0, 0
+connect(RunService.Heartbeat, function(dt)
+    local root, hum = getRoot(), getHum()
+    local tch = TargetPlayer and TargetPlayer.Character
+    local tr = tch and tch:FindFirstChild("HumanoidRootPart")
+    if not (root and hum and tr) then return end
+    if F.Hump then
+        humpT = humpT + dt * F.HumpSpeed
+        local thrust = (math.sin(humpT) + 1) / 2 * F.HumpReach
+        root.CFrame = tr.CFrame * CFrame.new(0, 0, 1.2 + thrust)
+        root.AssemblyLinearVelocity = Vector3.zero
+    elseif F.Headsit then
+        local head = tch:FindFirstChild("Head")
+        if head then
+            hum.Sit = true
+            root.CFrame = head.CFrame * CFrame.new(0, 1.6, 0)
+            root.AssemblyLinearVelocity = Vector3.zero
+        end
+    elseif F.Piggy then
+        hum.Sit = true
+        root.CFrame = tr.CFrame * CFrame.new(0, 1.2, 1.1) * CFrame.Angles(math.rad(90), 0, 0)
+        root.AssemblyLinearVelocity = Vector3.zero
+    elseif F.FollowT then
+        root.CFrame = tr.CFrame * CFrame.new(0, 0, 3)
+    elseif F.LoopTP then
+        root.CFrame = tr.CFrame
+    elseif F.Shake then
+        humpT = humpT + dt * 60
+        root.CFrame = tr.CFrame * CFrame.new(math.sin(humpT) * 2, 0, math.cos(humpT * 0.7) * 2)
+    end
+    if F.FlingT then
+        flingT = flingT + dt
+        root.CFrame = tr.CFrame * CFrame.new(0, 0, (flingT % 0.2 < 0.1) and 1 or -1)
+        root.AssemblyAngularVelocity = Vector3.new(0, 9e4, 0)
+        root.AssemblyLinearVelocity = Vector3.new(9e5, 9e5, 9e5)
+    end
+end)
+
 connect(RunService.Stepped, function()
     if F.NoClip then
         local c = getChar()
@@ -2823,6 +2862,16 @@ local g8 = sTr:CreateGroupbox("Target (use Teleport tab to pick)", "Right")
 tog(g8, "Orbit Target", "Orbit")
 sld(g8, "Orbit Distance", 3, 40, "OrbitDist", " studs")
 sld(g8, "Orbit Speed", 1, 20, "OrbitSpeed")
+local g10 = sTr:CreateGroupbox("Annoy Target", "Left")
+tog(g10, "Humper (behind target)", "Hump", true)
+sld(g10, "Hump Speed", 4, 40, "HumpSpeed")
+sld(g10, "Hump Reach", 1, 5, "HumpReach")
+tog(g10, "Head Sit", "Headsit")
+tog(g10, "Piggyback", "Piggy")
+tog(g10, "Follow Behind", "FollowT")
+tog(g10, "Loop Teleport (on top)", "LoopTP")
+tog(g10, "Shake Around Target", "Shake")
+tog(g10, "Fling Target", "FlingT", true)
 g8:AddToggle("Spectate Target", false, { Callback = function(v)
     F.Spectate = v
     if not v then local h = getHum() if h then Camera.CameraSubject = h end end
