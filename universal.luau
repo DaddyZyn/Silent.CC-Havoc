@@ -2745,16 +2745,69 @@ connect(LocalPlayer.Idled, function()
     end
 end)
 
+local targetDrop
+local playerMap = {}
+local function labelFor(p) return string.format("%s (@%s)", p.DisplayName, p.Name) end
+local function setTarget(p, silent)
+    TargetPlayer = p
+    if p and targetDrop and targetDrop.SetValue and not silent then
+        pcall(targetDrop.SetValue, labelFor(p))
+    end
+    if p then Library.Notify("Target: " .. p.DisplayName) end
+end
+local function refreshPlayers()
+    table.clear(playerMap)
+    local names = {}
+    for _, p in ipairs(otherPlayers()) do
+        local l = labelFor(p)
+        playerMap[l] = p
+        names[#names + 1] = l
+    end
+    table.sort(names)
+    if #names == 0 then names[1] = "No other players" end
+    if targetDrop and targetDrop.SetOptions then
+        local keep = TargetPlayer and TargetPlayer.Parent and labelFor(TargetPlayer) or names[1]
+        pcall(targetDrop.SetOptions, names, keep)
+    end
+    return names
+end
 local function cycleTarget(step)
-    local list = otherPlayers()
-    if #list == 0 then Library.Notify("No other players") return end
+    local names = refreshPlayers()
+    if not playerMap[names[1]] then Library.Notify("No other players") return end
     local idx = 0
-    for i, p in ipairs(list) do if p == TargetPlayer then idx = i end end
-    idx = ((idx - 1 + step) % #list) + 1
-    TargetPlayer = list[idx]
-    Library.Notify("Target: " .. TargetPlayer.DisplayName)
+    for i, n in ipairs(names) do if playerMap[n] == TargetPlayer then idx = i end end
+    idx = ((idx - 1 + step) % #names) + 1
+    setTarget(playerMap[names[idx]])
+end
+local function aimedPlayer()
+    local best, bd = nil, math.huge
+    local c = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    for _, p in ipairs(otherPlayers()) do
+        local r = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+        if r then
+            local sp, on = Camera:WorldToViewportPoint(r.Position)
+            local d = (Vector2.new(sp.X, sp.Y) - c).Magnitude
+            if on and d < bd then best, bd = p, d end
+        end
+    end
+    return best
 end
 
+local warnT = 0
+connect(RunService.Heartbeat, function()
+    if TargetPlayer and not TargetPlayer.Parent then
+        TargetPlayer = nil
+        Library.Notify("Target left the game")
+    end
+    if not TargetPlayer and (F.Hump or F.Headsit or F.Piggy or F.FollowT or F.LoopTP or F.Shake or F.FlingT or F.Orbit) then
+        if os.clock() - warnT > 4 then
+            warnT = os.clock()
+            Library.Notify("Pick a target in the Lobby tab first")
+        end
+    end
+end)
+connect(Players.PlayerAdded, function() if Running then refreshPlayers() end end)
+connect(Players.PlayerRemoving, function() task.defer(refreshPlayers) end)
 -- =========================================================================
 -- INTERFACE
 -- =========================================================================
@@ -2884,15 +2937,52 @@ sld(g4, "Fly Speed", 20, 300, "FlySpeed")
 tog(g4, "Noclip", "NoClip", true)
 tog(g4, "Infinite Jump", "InfJump", true)
 
-local tp = Window:CreateTab("Teleport")
-local sTp = tp:CreateSubtab("Teleports")
-local g5 = sTp:CreateGroupbox("Players", "Left")
-g5:AddButton("Next Player", function() cycleTarget(1) end)
-g5:AddButton("Previous Player", function() cycleTarget(-1) end)
-g5:AddButton("Teleport To Target", function()
+local lobby = Window:CreateTab("Lobby")
+local sLob = lobby:CreateSubtab("Players")
+local gSel = sLob:CreateGroupbox("Target Selector", "Left")
+do
+    local names = {}
+    for _, p in ipairs(otherPlayers()) do
+        local l = labelFor(p)
+        playerMap[l] = p
+        names[#names + 1] = l
+    end
+    table.sort(names)
+    if #names == 0 then names[1] = "No other players" end
+    targetDrop = gSel:AddDropdown("Selected Player", names, names[1], function(v)
+        local p = playerMap[v]
+        if p and p ~= TargetPlayer then setTarget(p, true) end
+    end)
+end
+gSel:AddButton("Refresh Player List", function() refreshPlayers() Library.Notify("Player list refreshed") end)
+gSel:AddButton("Next Player", function() cycleTarget(1) end)
+gSel:AddButton("Previous Player", function() cycleTarget(-1) end)
+gSel:AddButton("Select Player Under Crosshair", function()
+    local p = aimedPlayer()
+    if p then setTarget(p) else Library.Notify("Nobody on screen") end
+end)
+gSel:AddButton("Clear Target", function() TargetPlayer = nil Library.Notify("Target cleared") end)
+local gAct = sLob:CreateGroupbox("Quick Actions", "Right")
+gAct:AddButton("Teleport To Target", function()
     local r = TargetPlayer and TargetPlayer.Character and TargetPlayer.Character:FindFirstChild("HumanoidRootPart")
     if r then teleportTo(r.CFrame * CFrame.new(0, 0, 4)) else Library.Notify("Pick a target first") end
 end)
+gAct:AddToggle("Spectate Target", false, { Callback = function(v)
+    F.Spectate = v
+    if not v then local h = getHum() if h then Camera.CameraSubject = h end end
+end })
+gAct:AddButton("Copy Target Username", function()
+    if TargetPlayer and setclipboard then setclipboard(TargetPlayer.Name) Library.Notify("Copied") end
+end)
+local gLob = sLob:CreateGroupbox("Lobby Info", "Left")
+gLob:AddLabel("Players in server: " .. #Players:GetPlayers() .. " / " .. Players.MaxPlayers)
+gLob:AddLabel("Server: " .. string.sub(tostring(game.JobId), 1, 8))
+gLob:AddLabel("Use Refresh after people join or leave")
+
+local tp = Window:CreateTab("Teleport")
+local sTp = tp:CreateSubtab("Teleports")
+local g5 = sTp:CreateGroupbox("Players", "Left")
+g5:AddLabel("Pick targets in the Lobby tab")
 g5:AddButton("Teleport To Nearest", function()
     local mine, best, bd = getRoot(), nil, math.huge
     for _, p in ipairs(otherPlayers()) do
@@ -2913,7 +3003,7 @@ local g7 = sTr:CreateGroupbox("Self", "Left")
 tog(g7, "Spinbot", "Spin", true)
 sld(g7, "Spin Speed", 5, 100, "SpinSpeed")
 tog(g7, "Fling (touch players)", "Fling", true)
-local g8 = sTr:CreateGroupbox("Target (use Teleport tab to pick)", "Right")
+local g8 = sTr:CreateGroupbox("Target (pick in Lobby tab)", "Right")
 tog(g8, "Orbit Target", "Orbit")
 sld(g8, "Orbit Distance", 3, 40, "OrbitDist", " studs")
 sld(g8, "Orbit Speed", 1, 20, "OrbitSpeed")
@@ -2927,10 +3017,6 @@ tog(g10, "Follow Behind", "FollowT")
 tog(g10, "Loop Teleport (on top)", "LoopTP")
 tog(g10, "Shake Around Target", "Shake")
 tog(g10, "Fling Target", "FlingT", true)
-g8:AddToggle("Spectate Target", false, { Callback = function(v)
-    F.Spectate = v
-    if not v then local h = getHum() if h then Camera.CameraSubject = h end end
-end })
 
 local st = Window:CreateTab("Settings")
 local sSt = st:CreateSubtab("Menu")
