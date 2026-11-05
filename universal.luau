@@ -2390,6 +2390,8 @@ local F = {
     Fullbright = false, NoFog = false, FOV = 70, FovOn = false,
     SpeedOn = false, Speed = 50, SpeedMode = "CFrame", Jump = false, JumpPower = 50, JumpOn = false,
     InfJump = false, Fly = false, FlySpeed = 70, NoClip = false, Bhop = false,
+    ChatSpam = false, ChatMsg = "get ragebaited lol", ChatDelay = 3, EmoteSpam = false, JumpSpam = false,
+    AntiRagdoll = false, AntiVoid = false, BlockPath = false, StareT = false, WalkFling = false, Freeze = false, MirrorT = false,
     Spin = false, SpinSpeed = 30, Fling = false, Orbit = false, OrbitSpeed = 3, OrbitDist = 8,
     Spectate = false, ClickTP = false, AntiAFK = true,
     Skeleton = false, HeadDot = false, Chams = false, ChamFill = 5, WireChams = false, Rainbow = false,
@@ -2793,13 +2795,84 @@ local function aimedPlayer()
     return best
 end
 
+local function sendChat(msg)
+    pcall(function()
+        local TCS = game:GetService("TextChatService")
+        if TCS.ChatVersion == Enum.ChatVersion.TextChatService then
+            TCS.TextChannels.RBXGeneral:SendAsync(msg)
+        else
+            game:GetService("ReplicatedStorage").DefaultChatSystemChatEvents.SayMessageRequest:FireServer(msg, "All")
+        end
+    end)
+end
+local chatT, emoteT, voidPart, safeY = 0, 0, nil, nil
+local emotes = { "/e dance", "/e dance2", "/e dance3", "/e laugh", "/e cheer", "/e point", "/e wave" }
+local emoteI = 0
+connect(RunService.Heartbeat, function(dt)
+    local root, hum = getRoot(), getHum()
+    local now = os.clock()
+    if F.ChatSpam and now - chatT >= F.ChatDelay then
+        chatT = now
+        sendChat(F.ChatMsg)
+    end
+    if F.EmoteSpam and now - emoteT >= 1.5 then
+        emoteT = now
+        emoteI = emoteI % #emotes + 1
+        sendChat(emotes[emoteI])
+    end
+    if not (root and hum) then return end
+    if F.JumpSpam then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+    if F.AntiRagdoll then
+        for _, st in ipairs({ Enum.HumanoidStateType.Ragdoll, Enum.HumanoidStateType.FallingDown, Enum.HumanoidStateType.PlatformStanding }) do
+            pcall(hum.SetStateEnabled, hum, st, false)
+        end
+        if hum:GetState() == Enum.HumanoidStateType.Ragdoll or hum:GetState() == Enum.HumanoidStateType.FallingDown then
+            hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+        end
+        hum.PlatformStand = false
+        if root.AssemblyLinearVelocity.Magnitude > 120 then root.AssemblyLinearVelocity = Vector3.zero end
+        root.AssemblyAngularVelocity = Vector3.zero
+    end
+    if F.AntiVoid then
+        if not voidPart then
+            voidPart = Instance.new("Part")
+            voidPart.Size = Vector3.new(2048, 2, 2048)
+            voidPart.Anchored = true
+            voidPart.Transparency = 1
+            voidPart.Name = "snowAntiVoid"
+            voidPart.Parent = workspace
+        end
+        if hum.FloorMaterial ~= Enum.Material.Air then safeY = root.Position.Y - 12 end
+        voidPart.Position = Vector3.new(root.Position.X, (safeY or root.Position.Y - 40) - 1, root.Position.Z)
+    elseif voidPart then
+        voidPart:Destroy() voidPart = nil
+    end
+    local tch = TargetPlayer and TargetPlayer.Character
+    local tr = tch and tch:FindFirstChild("HumanoidRootPart")
+    if F.Freeze and not F.Fly then root.AssemblyLinearVelocity = Vector3.zero end
+    if not tr then return end
+    if F.BlockPath then
+        root.CFrame = CFrame.new((tr.CFrame * CFrame.new(0, 0, -3.5)).Position, tr.Position)
+        root.AssemblyLinearVelocity = Vector3.zero
+    elseif F.StareT then
+        root.CFrame = CFrame.lookAt(root.Position, Vector3.new(tr.Position.X, root.Position.Y, tr.Position.Z))
+    elseif F.MirrorT then
+        local off = tr.CFrame:ToObjectSpace(CFrame.new(root.Position))
+        root.CFrame = tr.CFrame * CFrame.new(-off.X, 0, -off.Z) * CFrame.new(0, off.Y, 0)
+    end
+    if F.WalkFling then
+        root.AssemblyAngularVelocity = Vector3.new(0, 9e4, 0)
+        root.AssemblyLinearVelocity = hum.MoveDirection * 80 + Vector3.new(0, 30, 0)
+    end
+end)
+
 local warnT = 0
 connect(RunService.Heartbeat, function()
     if TargetPlayer and not TargetPlayer.Parent then
         TargetPlayer = nil
         Library.Notify("Target left the game")
     end
-    if not TargetPlayer and (F.Hump or F.Headsit or F.Piggy or F.FollowT or F.LoopTP or F.Shake or F.FlingT or F.Orbit) then
+    if not TargetPlayer and (F.Hump or F.Headsit or F.Piggy or F.FollowT or F.LoopTP or F.Shake or F.FlingT or F.Orbit or F.BlockPath or F.StareT or F.MirrorT) then
         if os.clock() - warnT > 4 then
             warnT = os.clock()
             Library.Notify("Pick a target in the Lobby tab first")
@@ -3017,6 +3090,22 @@ tog(g10, "Follow Behind", "FollowT")
 tog(g10, "Loop Teleport (on top)", "LoopTP")
 tog(g10, "Shake Around Target", "Shake")
 tog(g10, "Fling Target", "FlingT", true)
+
+local g11 = sTr:CreateGroupbox("Ragebait", "Right")
+tog(g11, "Block Target's Path", "BlockPath")
+tog(g11, "Stare At Target", "StareT")
+tog(g11, "Mirror Target Movement", "MirrorT")
+tog(g11, "Walk Fling (touch to fling)", "WalkFling", true)
+tog(g11, "Anti-Ragdoll / Anti-Fling", "AntiRagdoll")
+tog(g11, "Anti-Void Platform", "AntiVoid")
+tog(g11, "Jump Spam", "JumpSpam")
+tog(g11, "Freeze In Air", "Freeze")
+tog(g11, "Chat Spam", "ChatSpam")
+tog(g11, "Emote Spam", "EmoteSpam")
+sld(g11, "Chat Delay", 1, 15, "ChatDelay", "s")
+g11:AddButton("Set Chat Message: ragebait", function() F.ChatMsg = "ez ragebait 😭 skill issue" end)
+g11:AddButton("Set Chat Message: slap", function() F.ChatMsg = "you just got slapped off the tower lol" end)
+g11:AddButton("Set Chat Message: L", function() F.ChatMsg = "L + ratio + fell off" end)
 
 local st = Window:CreateTab("Settings")
 local sSt = st:CreateSubtab("Menu")
