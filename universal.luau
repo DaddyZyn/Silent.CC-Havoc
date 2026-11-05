@@ -2391,6 +2391,7 @@ local F = {
     SpeedOn = false, Speed = 50, SpeedMode = "CFrame", Jump = false, JumpPower = 50, JumpOn = false,
     InfJump = false, Fly = false, FlySpeed = 70, NoClip = false, Bhop = false,
     ChatSpam = false, ChatMsg = "get ragebaited lol", ChatDelay = 3, EmoteSpam = false, JumpSpam = false,
+    AntiFreeze = false, AntiYeet = false, AutoReturn = false, AntiBodyMover = false, KeepSpeed = false,
     AntiRagdoll = false, AntiVoid = false, BlockPath = false, StareT = false, WalkFling = false, Freeze = false, MirrorT = false,
     Spin = false, SpinSpeed = 30, Fling = false, Orbit = false, OrbitSpeed = 3, OrbitDist = 8,
     Spectate = false, ClickTP = false, AntiAFK = true,
@@ -2866,6 +2867,54 @@ connect(RunService.Heartbeat, function(dt)
     end
 end)
 
+local lastPos, lastGood = nil, nil
+connect(RunService.Heartbeat, function()
+    local char, root, hum = getChar(), getRoot(), getHum()
+    if not (char and root and hum) then lastPos = nil return end
+    if F.AntiFreeze then
+        for _, p in ipairs(char:GetDescendants()) do
+            if p:IsA("BasePart") and p.Anchored then p.Anchored = false end
+        end
+        hum.PlatformStand = false
+        if hum.Sit and not F.Piggy and not F.Headsit then hum.Sit = false end
+    end
+    if F.AntiBodyMover then
+        for _, o in ipairs(char:GetDescendants()) do
+            if o:IsA("BodyMover") or o:IsA("BodyVelocity") or o:IsA("BodyGyro") or o:IsA("BodyPosition")
+                or o:IsA("VectorForce") or o:IsA("LinearVelocity") or o:IsA("AlignPosition") or o:IsA("BodyAngularVelocity") then
+                if not o:GetAttribute("snow") then pcall(o.Destroy, o) end
+            end
+        end
+    end
+    if F.KeepSpeed and not F.SpeedOn then
+        if hum.WalkSpeed < 16 then hum.WalkSpeed = 16 end
+        if hum.JumpPower < 50 and hum.UseJumpPower then hum.JumpPower = 50 end
+    end
+    if F.AntiYeet then
+        local v = root.AssemblyLinearVelocity
+        if v.Magnitude > 150 and not F.Fling and not F.WalkFling and not F.Fly then
+            root.AssemblyLinearVelocity = Vector3.zero
+            root.AssemblyAngularVelocity = Vector3.zero
+        end
+    end
+    if F.AutoReturn then
+        local pos = root.Position
+        if lastPos and (pos - lastPos).Magnitude > 60 and not F.Fling and not F.WalkFling and not F.LoopTP then
+            if lastGood then
+                root.CFrame = CFrame.new(lastGood + Vector3.new(0, 3, 0))
+                root.AssemblyLinearVelocity = Vector3.zero
+                Library.Notify("Yeet blocked - returned you", 2)
+                lastPos = lastGood
+                return
+            end
+        end
+        lastPos = pos
+        if hum.FloorMaterial ~= Enum.Material.Air and root.AssemblyLinearVelocity.Magnitude < 60 then lastGood = pos end
+    else
+        lastPos = nil
+    end
+end)
+
 local warnT = 0
 connect(RunService.Heartbeat, function()
     if TargetPlayer and not TargetPlayer.Parent then
@@ -3091,6 +3140,15 @@ tog(g10, "Loop Teleport (on top)", "LoopTP")
 tog(g10, "Shake Around Target", "Shake")
 tog(g10, "Fling Target", "FlingT", true)
 
+local gAA = sTr:CreateGroupbox("Anti-Admin (vs yeet/freeze)", "Left")
+tog(gAA, "Anti-Freeze (unanchor)", "AntiFreeze", true)
+tog(gAA, "Anti-Yeet (cancel big velocity)", "AntiYeet", true)
+tog(gAA, "Auto-Return After Teleport", "AutoReturn", true)
+tog(gAA, "Anti Body-Movers", "AntiBodyMover")
+tog(gAA, "Keep Normal Speed/Jump", "KeepSpeed")
+gAA:AddButton("Enable All Anti-Admin", function()
+    for _, k in ipairs({ "AntiFreeze", "AntiYeet", "AutoReturn", "AntiBodyMover", "AntiRagdoll", "AntiVoid" }) do setF(k, true) end
+end)
 local g11 = sTr:CreateGroupbox("Ragebait", "Right")
 tog(g11, "Block Target's Path", "BlockPath")
 tog(g11, "Stare At Target", "StareT")
