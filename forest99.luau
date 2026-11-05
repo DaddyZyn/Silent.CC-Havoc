@@ -2395,7 +2395,7 @@ local F = {
     TreeAura = false, TreeRange = 25,
     SilentAim = false, SilentFOV = 250, SilentPassive = false,
     DeerBanish = false, DeerRange = 150,
-    AutoFeed = false, FeedRange = 60, FeedOrder = "fire, item",
+    AutoFeed = false, FeedRange = 60, FeedOrder = "try both",
     God = false,
     AutoEat = false, EatBelow = 70,
     AutoSawmill = false,
@@ -2728,8 +2728,11 @@ task.spawn(function()
                                 fire("RequestBurnItem", it, fireModel)
                             elseif F.FeedOrder == "item only" then
                                 fire("RequestBurnItem", it)
+                            elseif F.FeedOrder == "fire, item" then
+                                fire("RequestBurnItem", fireModel, it)
                             else
                                 fire("RequestBurnItem", fireModel, it)
+                                fire("RequestBurnItem", it, fireModel)
                             end
                         end
                     end
@@ -3053,7 +3056,7 @@ local subSelf = surv:CreateSubtab("Player")
 local gbFire = subBase:CreateGroupbox("Campfire", "Left")
 tog(gbFire, "Auto-Feed Campfire", "AutoFeed", true)
 sld(gbFire, "Item Range", 10, 200, "FeedRange", " studs")
-gbFire:AddDropdown("Burn Arguments", { "fire, item", "item, fire", "item only" }, F.FeedOrder, function(v) F.FeedOrder = v end)
+gbFire:AddDropdown("Burn Arguments", { "try both", "fire, item", "item, fire", "item only" }, F.FeedOrder, function(v) F.FeedOrder = v end)
 local gbMach = subBase:CreateGroupbox("Machines", "Right")
 tog(gbMach, "Auto Sawmill Lever", "AutoSawmill")
 gbMach:AddButton("Clear Weather", function()
