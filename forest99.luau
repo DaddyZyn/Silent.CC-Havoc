@@ -2638,8 +2638,12 @@ local function findEquippedTool()
     local name = equippedToolName()
     local c = getChar()
     if c then
+        if name and c:FindFirstChild(name) then return c:FindFirstChild(name) end
         for _, t in ipairs(c:GetChildren()) do
-            if t:IsA("Tool") and (not name or t.Name == name) then return t end
+            if t:IsA("Tool") then return t end
+        end
+        for _, t in ipairs(c:GetChildren()) do
+            if t:IsA("Model") and t:FindFirstChild("Handle") then return t end
         end
     end
     return nil
@@ -2649,7 +2653,14 @@ end
 local function hit(target)
     local tool = findEquippedTool()
     local r = modelRoot(target)
-    if not (tool and r) then return end
+    if not r then return end
+    if not tool then
+        if os.clock() - (F.lastToolWarn or 0) > 5 then
+            F.lastToolWarn = os.clock()
+            Library.Notify("Kill aura: equip a weapon first")
+        end
+        return
+    end
     invoke("ToolDamageObject", target, tool, F.AuraDamage, r.CFrame)
 end
 
@@ -2796,7 +2807,9 @@ connect(RunService.Heartbeat, function(dt)
         if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cf.RightVector end
         if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.yAxis end
         if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.yAxis end
-        root.AssemblyLinearVelocity = dir.Magnitude > 0 and dir.Unit * F.FlySpeed or Vector3.zero
+        hum:ChangeState(Enum.HumanoidStateType.Physics)
+        root.AssemblyLinearVelocity = dir.Magnitude > 0 and dir.Unit * F.FlySpeed or Vector3.new(0, 0.5, 0)
+        root.CFrame = root.CFrame + dir * (F.FlySpeed * dt * 0.5)
     elseif F.SpeedOn and not isMenuVisible then
         local move = hum.MoveDirection
         if F.SpeedMode == "CFrame" then
