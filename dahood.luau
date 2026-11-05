@@ -1268,32 +1268,44 @@ end
 
 local function fillParams(params, part, pos)
     pos = pos or predict(part, 1)
-    local origin = params.ForcedOrigin
+    local tool = toolEquipped()
+    local origin = params.ForcedOrigin or params.Origin
+    if typeof(origin) ~= "Vector3" then
+        if tool then
+            local p = tool:FindFirstChild("Muzzle") or tool:FindFirstChild("Handle") or tool:FindFirstChildWhichIsA("BasePart")
+            if p then origin = p.Position end
+        end
+    end
     if typeof(origin) ~= "Vector3" then origin = cam().CFrame.Position end
+
     local dir = pos - origin
-    if dir.Magnitude < 0.01 then dir = Vector3.new(0, 0, -1) end
-    dir = dir.Unit
+    local dist = dir.Magnitude
+    if dist < 0.01 then
+        dir = Vector3.new(0, 0, -1)
+        dist = 1
+    else
+        dir = dir.Unit
+    end
 
     params.AimPosition = pos
-    params.Normal = dir
-    if typeof(params.Hit) == "Instance" then
-        params.Hit = part
-    else
-        params.Hit = true
-    end
+    params.Normal = -dir
     params.HitPosition = pos
     params.HitNormal = -dir
     params.HitInstance = part
-    if state.rangeOverride then params.Range = state.rangeValue end
+    params.Hit = part
+    params.Target = part
+
+    if state.rangeOverride then
+        params.Range = state.rangeValue
+    elseif params.Range ~= nil and params.Range < dist + 10 then
+        -- Guarantee weapon range covers the target so server check passes
+        params.Range = dist + 50
+    end
 
     if state.wallbangMode == "Hard" then
         local back = origin - pos
         if back.Magnitude > 0.01 then
             params.ForcedOrigin = pos + back.Unit * 1.5
-        end
-    elseif state.wallbangMode == "Soft" then
-        if params.Range ~= nil then
-            params.Range = math.max(params.Range, (pos - origin).Magnitude + 50)
         end
     end
 
@@ -1352,7 +1364,11 @@ local function liveSilentPart()
         end
         silPart, silPos = nil, nil
     end
-    local target = findTarget(state.silentPart, state.silentFov, state.silentTeamCheck, ignoreVis(), screenCentre())
+    local originPoint = cursorPoint()
+    if state.silentCircleY and state.silentCircleY ~= 0 then
+        originPoint = Vector2.new(originPoint.X, originPoint.Y + state.silentCircleY)
+    end
+    local target = findTarget(state.silentPart, state.silentFov, state.silentTeamCheck, ignoreVis(), originPoint)
     if not target then silPart, silPos = nil, nil; return nil end
     if math.random(1, 100) > state.silentChance then silPart, silPos = nil, nil; return nil end
     local part = getPart(target, state.silentPart)
@@ -1370,9 +1386,8 @@ local function install(name, wrapper)
         GunHandler[name] = function(...) return wrapper(fn, ...) end
         return true
     end
-    local ok, orig
-    pcall(function()
-        orig = hookfunction(fn, function(...) return wrapper(orig, ...) end)
+    local ok, orig = pcall(function()
+        return hookfunction(fn, function(...) return wrapper(orig, ...) end)
     end)
     if not ok or type(orig) ~= "function" then
         originals[name] = fn
@@ -1638,7 +1653,7 @@ local function renderESP()
             local bottom = cam():WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
             local col = colorFor(plr)
 
-            if onScreen and dist <= state.espMaxDist then
+            if onScreen and top.Z > 0 and dist <= state.espMaxDist then
                 local h = math.abs(bottom.Y - top.Y)
                 local w = h * 0.55
                 local x = top.X - w / 2
@@ -1821,9 +1836,12 @@ local function snaplineFrom(origin)
         return Vector2.new(vp.X / 2, vp.Y)
     end
     local tool = toolEquipped()
-    if tool and tool:FindFirstChild("Handle") then
-        local sp, on = cam():WorldToViewportPoint(tool.Handle.Position)
-        if on then return Vector2.new(sp.X, sp.Y) end
+    if tool then
+        local p = tool:FindFirstChild("Muzzle") or tool:FindFirstChild("Handle") or tool:FindFirstChildWhichIsA("BasePart")
+        if p then
+            local sp, on = cam():WorldToViewportPoint(p.Position)
+            if on and sp.Z > 0 then return Vector2.new(sp.X, sp.Y) end
+        end
     end
     return cursorPoint()
 end
@@ -1873,7 +1891,7 @@ track(RunService.RenderStepped:Connect(function()
         local part = getPart(aimTarget, state.aimPart)
         if part then
             local sp, on = cam():WorldToViewportPoint(part.Position)
-            if on then
+            if on and sp.Z > 0 then
                 aimSnapline.Visible = true
                 aimSnapline.Color = state.aimSnaplineColor
                 aimSnapline.Thickness = state.aimSnaplineWidth
@@ -1882,6 +1900,8 @@ track(RunService.RenderStepped:Connect(function()
             else
                 aimSnapline.Visible = false
             end
+        else
+            aimSnapline.Visible = false
         end
     else
         aimSnapline.Visible = false
@@ -1892,7 +1912,7 @@ track(RunService.RenderStepped:Connect(function()
         local part, pos = liveSilentPart()
         if part and pos then
             local sp, on = cam():WorldToViewportPoint(pos)
-            if on then
+            if on and sp.Z > 0 then
                 silentSnapline.Visible = true
                 silentSnapline.Color = state.silentSnaplineColor
                 silentSnapline.Thickness = state.silentSnaplineWidth
@@ -1901,6 +1921,8 @@ track(RunService.RenderStepped:Connect(function()
             else
                 silentSnapline.Visible = false
             end
+        else
+            silentSnapline.Visible = false
         end
     else
         silentSnapline.Visible = false
@@ -2230,20 +2252,11 @@ task.spawn(function()
     -- shield first so Adonis detectors are already zombied when the
     -- namecall hook goes live
     pcall(armShield)
-    if Shield.armed then
+    if Shield.armed or not hookmetamethod then
         installNamecall()
     else
-        print("[snow] shield not armed - namecall hook deferred")
-        task.spawn(function()
-            for _ = 1, 40 do
-                if state.unloaded then return end
-                if Shield.armed then
-                    installNamecall()
-                    return
-                end
-                task.wait(0.5)
-            end
-        end)
+        -- If game does not use Adonis (e.g. Zee Hood), install namecall immediately
+        installNamecall()
     end
 end)
 
