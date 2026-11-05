@@ -1,7 +1,7 @@
 -- snow.cc | Zee Hood dumper
 -- Run it, equip a gun, SHOOT at a player/dummy ~5 times, then check the files in the Volt workspace:
 --   zeehood_dump.txt   (modules, GunHandler internals, remotes)
---   zeehood_calls.txt  (every remote call made while you shoot, with arguments)
+--   zeehood_calls.txt  (every GunHandler call made while you shoot, with arguments)
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local LP = Players.LocalPlayer
@@ -105,21 +105,25 @@ for _, c in ipairs({ LP.Backpack, LP.Character }) do
 end
 save()
 
--- 5. remote spy while you shoot
-local gnm = getnamecallmethod
-local old
-old = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-    local m = gnm()
-    if (m == "FireServer" or m == "InvokeServer") and typeof(self) == "Instance" then
-        local a = table.pack(...)
-        local parts = {}
-        for i = 1, a.n do parts[#parts + 1] = ser(a[i]) end
-        calls[#calls + 1] = string.format("[%.2f] %s:%s(%s)", os.clock(), self:GetFullName(), m, table.concat(parts, ", "))
-        if #calls % 5 == 0 then task.defer(save) end
+-- 5. passive spy: wraps GunHandler functions (table fields only, NO remote/namecall hooks - the game detects those)
+if ok and type(G) == "table" then
+    for _, name in ipairs({ "Shoot", "GetAim", "Trace", "Fire", "Hit", "Damage" }) do
+        local fn = rawget(G, name)
+        if type(fn) == "function" then
+            G[name] = function(...)
+                local a = table.pack(...)
+                local parts = {}
+                for i = 1, a.n do parts[#parts + 1] = ser(a[i]) end
+                local r = table.pack(fn(...))
+                local rp = {}
+                for i = 1, r.n do rp[#rp + 1] = ser(r[i]) end
+                calls[#calls + 1] = string.format("[%.2f] GunHandler.%s(%s) -> (%s)", os.clock(), name, table.concat(parts, ", "), table.concat(rp, ", "))
+                task.defer(save)
+                return table.unpack(r, 1, r.n)
+            end
+        end
     end
-    return old(self, ...)
-end))
-
+end
 pcall(function()
     game:GetService("StarterGui"):SetCore("SendNotification", {
         Title = "snow.cc dumper", Text = "Equip a gun and shoot ~5 times. Dump saved to workspace.", Duration = 8,
