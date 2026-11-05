@@ -65,6 +65,7 @@ local state = {
     trigger = false, triggerDelay = 0.08, triggerPart = "Head", triggerFov = 150, triggerTeamCheck = true,
     silent = false, silentFov = 300, silentPart = "HumanoidRootPart", silentChance = 100,
     silentTeamCheck = true, wallbangMode = "Off", silentPrediction = true,
+    knockCheck = true, adaptiveHitbox = false, spreadCondenser = true,
     silentCircle = false, silentColor = Color3.fromRGB(0, 200, 255), silentCircleY = 0,
     silentSnapline = false, silentSnaplineOrigin = "Gun", silentSnaplineWidth = 1,
     silentSnaplineColor = Color3.fromRGB(0, 200, 255),
@@ -73,7 +74,7 @@ local state = {
     damageOverride = false, damageValue = 100,
     rangeOverride = false, rangeValue = 500,
     esp = false, espBox = true, espName = true, espHealth = true, espHealthBar = true, espDist = true,
-    espTracer = false, espMaxDist = 1500, espChams = false,
+    espTracer = false, espTool = true, espMaxDist = 1500, espChams = false,
     espEnemy = Color3.fromRGB(255, 60, 60), espTeam = Color3.fromRGB(60, 255, 120),
     speed = false, speedValue = 24, speedMode = "CFrame", jump = false, jumpValue = 55,
     hipHeight = false, hipValue = 2, fly = false, flySpeed = 60,
@@ -100,14 +101,40 @@ local function getRoot()
     local c = getChar()
     return c and c:FindFirstChild("HumanoidRootPart")
 end
+local function isKnocked(char)
+    if not char then return false end
+    local be = char:FindFirstChild("BodyEffects")
+    if be then
+        local ko = be:FindFirstChild("K.O") or be:FindFirstChild("KO") or be:FindFirstChild("Dead")
+        if ko and (ko:IsA("BoolValue") and ko.Value or ko:IsA("ValueBase") and ko.Value == true) then
+            return true
+        end
+    end
+    if char:FindFirstChild("KO") or char:FindFirstChild("Dead") then return true end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum and (hum.PlatformStand or hum:GetState() == Enum.HumanoidStateType.Physics) then
+        return true
+    end
+    return false
+end
+
 local function alive(plr)
     local c = plr and plr.Character
     local h = c and c:FindFirstChildOfClass("Humanoid")
-    return h ~= nil and h.Health > 0
+    if not (h ~= nil and h.Health > 0) then return false end
+    if state.knockCheck and isKnocked(c) then return false end
+    return true
 end
 local function getPart(plr, name)
     local c = plr and plr.Character
     if not c then return nil end
+    if (state.adaptiveHitbox or name == "Adaptive") then
+        local candidates = { "Head", "UpperTorso", "HumanoidRootPart", "LowerTorso" }
+        for _, n in ipairs(candidates) do
+            local p = c:FindFirstChild(n)
+            if p and p:IsA("BasePart") and visible(p) then return p end
+        end
+    end
     local p = c:FindFirstChild(name)
     if p and p:IsA("BasePart") then return p end
     p = c:FindFirstChild("Head")
@@ -2804,6 +2831,7 @@ local function buildESP()
             t.hpBg = Drawing.new("Square"); t.hpBg.Filled = true
             t.hpFill = Drawing.new("Square"); t.hpFill.Filled = true
             t.dist = Drawing.new("Text"); t.dist.Size = 12; t.dist.Center = true; t.dist.Outline = true
+            t.tool = Drawing.new("Text"); t.tool.Size = 11; t.tool.Center = true; t.tool.Outline = true
             t.tracer = Drawing.new("Line"); t.tracer.Thickness = 1
             espData[plr] = t
         end
@@ -2874,6 +2902,14 @@ local function renderESP()
                 t.dist.Text = math.floor(dist) .. "m"
                 t.dist.Color = col
                 t.dist.Position = Vector2.new(top.X, y + h + 2)
+
+                local eqTool = char:FindFirstChildOfClass("Tool")
+                t.tool.Visible = state.espTool and (eqTool ~= nil)
+                if t.tool.Visible and eqTool then
+                    t.tool.Text = "[" .. eqTool.Name:gsub("%[",""):gsub("%]","") .. "]"
+                    t.tool.Color = Color3.fromRGB(225, 225, 230)
+                    t.tool.Position = Vector2.new(top.X, y + h + (state.espDist and 14 or 2))
+                end
 
                 t.tracer.Visible = state.espTracer
                 t.tracer.Color = col
@@ -3228,7 +3264,9 @@ local SilentTab = Window:CreateTab("Silent")
 local SilentGroup = SilentTab:CreateGroupbox("Silent Aim", "Left")
 local silToggle = SilentGroup:AddToggle("Enabled", false, { Keybind = Enum.KeyCode.Q, Callback = function(v) state.silent = v end })
 register("silent.enabled", silToggle.SetValue, false)
-SilentGroup:AddDropdown("Hit limb", { "HumanoidRootPart", "Head", "Torso" }, "HumanoidRootPart", function(v) state.silentPart = v end)
+SilentGroup:AddDropdown("Hit limb", { "HumanoidRootPart", "Head", "Torso", "Adaptive" }, "HumanoidRootPart", function(v) state.silentPart = v end)
+SilentGroup:AddToggle("Knock Check", true, { Callback = function(v) state.knockCheck = v end })
+SilentGroup:AddToggle("Spread Condenser (Pellet Lock)", true, { Callback = function(v) state.spreadCondenser = v end })
 local silFov = SilentGroup:AddSlider("FOV", 20, 800, 300, "px", function(v) state.silentFov = v end)
 register("silent.fov", silFov.SetValue, 300)
 local silChance = SilentGroup:AddSlider("Hit Chance", 1, 100, 100, "%", function(v) state.silentChance = v end)
@@ -3273,6 +3311,7 @@ EspGroup:AddToggle("Name", true, { Callback = function(v) state.espName = v end 
 EspGroup:AddToggle("Health Text", true, { Callback = function(v) state.espHealth = v end })
 EspGroup:AddToggle("Health Bar", true, { Callback = function(v) state.espHealthBar = v end })
 EspGroup:AddToggle("Distance", true, { Callback = function(v) state.espDist = v end })
+EspGroup:AddToggle("Equipped Tool", true, { Callback = function(v) state.espTool = v end })
 EspGroup:AddToggle("Tracer", false, { Callback = function(v) state.espTracer = v end })
 EspGroup:AddToggle("Chams", false, { Callback = function(v) state.espChams = v end })
 local distS = EspGroup:AddSlider("Max Distance", 100, 5000, 1500, "m", function(v) state.espMaxDist = v end)
@@ -3432,15 +3471,10 @@ task.spawn(function()
     end
     if GunHandler then installAll() else warn("[snow] GunHandler never loaded") end
 
-    -- shield first so Adonis detectors are already zombied when the
-    -- namecall hook goes live
-    pcall(armShield)
-    if Shield.armed or not hookmetamethod then
-        installNamecall()
-    else
-        -- If game does not use Adonis (e.g. Zee Hood), install namecall immediately
-        installNamecall()
-    end
+    -- Zee Hood utilizes ReplicatedStorage.Modules.GunHandler directly.
+    -- Namecall Ray hooks are disabled to guarantee complete client stability and prevent crash/desync.
+    -- All silent aim, bullet redirect, and pellet condensation are executed inside GunHandler.Shoot.
+    pcall(loadConfig)
 end)
 
 print("[snow] loaded | GunHandler:", GunHandler and "hooked" or "missing")
