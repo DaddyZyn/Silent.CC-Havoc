@@ -2764,11 +2764,66 @@ local Window = Library.CreateWindow({
 })
 Library.CurrentWindow = Window
 
+local PanicKey = Enum.KeyCode.End
+local H = {}
+local DEFAULTS = {}
+for k, v in pairs(F) do DEFAULTS[k] = v end
 local function tog(g, label, key, bind)
-    return g:AddToggle(label, F[key], { HasKeybind = bind, Callback = function(v) F[key] = v end })
+    local h = g:AddToggle(label, F[key], { HasKeybind = bind, Callback = function(v) F[key] = v end })
+    H[key] = h
+    return h
 end
 local function sld(g, label, min, max, key, unit)
-    return g:AddSlider(label, min, max, F[key], unit or "", function(v) F[key] = v end)
+    local h = g:AddSlider(label, min, max, F[key], unit or "", function(v) F[key] = v end)
+    H[key] = h
+    return h
+end
+local HttpService = game:GetService("HttpService")
+local CFG_FILE = "snowcc_universal.json"
+local function setF(k, v)
+    F[k] = v
+    if H[k] and H[k].SetValue then pcall(H[k].SetValue, H[k], v) end
+end
+local function saveConfig()
+    if not writefile then Library.Notify("Executor has no writefile") return end
+    local t = {}
+    for k, v in pairs(F) do
+        if type(v) == "boolean" or type(v) == "number" or type(v) == "string" then t[k] = v end
+    end
+    pcall(writefile, CFG_FILE, HttpService:JSONEncode(t))
+    Library.Notify("Config saved")
+end
+local function loadConfig()
+    if not (isfile and readfile and isfile(CFG_FILE)) then Library.Notify("No saved config") return end
+    local ok, t = pcall(function() return HttpService:JSONDecode(readfile(CFG_FILE)) end)
+    if not ok then Library.Notify("Config corrupt") return end
+    for k, v in pairs(t) do
+        if F[k] ~= nil and type(F[k]) == type(v) then setF(k, v) end
+    end
+    Library.Notify("Config loaded")
+end
+local function resetAll()
+    for k, v in pairs(DEFAULTS) do
+        if type(v) == "boolean" or type(v) == "number" then setF(k, v) end
+    end
+    restoreLighting()
+    Workspace.Gravity = 196.2
+    Library.Notify("Everything reset")
+end
+local function unloadAll()
+    Running = false
+    for _, e in pairs(EspPool) do removeEsp(e) end
+    for p in pairs(SkelLines) do clearPlayerVisuals(p) end
+    for p in pairs(Chams) do clearPlayerVisuals(p) end
+    pcall(function() crossH:Remove() crossV:Remove() end)
+    pcall(function() chamFolder:Destroy() end)
+    Workspace.Gravity = 196.2
+    for _, c in ipairs(Connections) do pcall(function() c:Disconnect() end) end
+    for k, v in pairs(F) do if type(v) == "boolean" then F[k] = false end end
+    restoreLighting()
+    local h = getHum()
+    if h then Camera.CameraSubject = h end
+    Window.ScreenGui:Destroy()
 end
 
 local vis = Window:CreateTab("Visuals")
@@ -2879,25 +2934,63 @@ end })
 
 local st = Window:CreateTab("Settings")
 local sSt = st:CreateSubtab("Menu")
+local sCfg = st:CreateSubtab("Config")
+local sMisc = st:CreateSubtab("Server")
+
 local g9 = sSt:CreateGroupbox("Interface", "Left")
 g9:AddKeybind("Menu Key", Enum.KeyCode.RightControl, function(key) Window:SetToggleKey(key or Enum.KeyCode.RightControl) end)
 g9:AddToggle("Show Watermark", true, { Callback = function(v) Window.Watermark.Visible = v end })
-tog(g9, "Anti-AFK", "AntiAFK")
-g9:AddButton("Rejoin Server", function() game:GetService("TeleportService"):Teleport(game.PlaceId, LocalPlayer) end)
-g9:AddButton("Unload Script", function()
-    Running = false
-    for _, e in pairs(EspPool) do removeEsp(e) end
-    for p in pairs(SkelLines) do clearPlayerVisuals(p) end
-    for p in pairs(Chams) do clearPlayerVisuals(p) end
-    pcall(function() crossH:Remove() crossV:Remove() end)
-    pcall(function() chamFolder:Destroy() end)
-    Workspace.Gravity = 196.2
-    for _, c in ipairs(Connections) do pcall(function() c:Disconnect() end) end
-    for k, v in pairs(F) do if type(v) == "boolean" then F[k] = false end end
-    restoreLighting()
-    local h = getHum()
-    if h then Camera.CameraSubject = h end
-    Window.ScreenGui:Destroy()
-end)
+g9:AddToggle("Keybind List", true, { Callback = function(v) Library.BindHudEnabled = v Library.RefreshBinds() end })
+g9:AddLabel("Binds appear in the list when toggled on")
+local gU = sSt:CreateGroupbox("Unload", "Right")
+gU:AddKeybind("Panic / Unload Key", Enum.KeyCode.End, function(key) PanicKey = key end)
+gU:AddButton("Unload Script", unloadAll)
+gU:AddButton("Reset All Features", resetAll)
 
+local gCfg = sCfg:CreateGroupbox("Config", "Left")
+gCfg:AddButton("Save Config", saveConfig)
+gCfg:AddButton("Load Config", loadConfig)
+gCfg:AddButton("Reset To Defaults", resetAll)
+local gPre = sCfg:CreateGroupbox("Presets", "Right")
+gPre:AddButton("Visuals Only", function()
+    resetAll()
+    for _, k in ipairs({ "ESP", "Skeleton", "Chams", "Fullbright", "Crosshair" }) do setF(k, true) end
+end)
+gPre:AddButton("Movement Pack", function()
+    resetAll()
+    for _, k in ipairs({ "SpeedOn", "InfJump", "NoClip" }) do setF(k, true) end
+end)
+gPre:AddButton("Disable Everything", resetAll)
+
+local gSrv = sMisc:CreateGroupbox("Server", "Left")
+tog(gSrv, "Anti-AFK", "AntiAFK")
+gSrv:AddButton("Rejoin Server", function() game:GetService("TeleportService"):Teleport(game.PlaceId, LocalPlayer) end)
+gSrv:AddButton("Server Hop", function()
+    local ok, data = pcall(function()
+        return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"))
+    end)
+    if ok and data and data.data then
+        for _, sv in ipairs(data.data) do
+            if sv.id ~= game.JobId and sv.playing < sv.maxPlayers then
+                game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, sv.id, LocalPlayer)
+                return
+            end
+        end
+    end
+    Library.Notify("No server found")
+end)
+gSrv:AddButton("Copy Join Script", function()
+    if setclipboard then
+        setclipboard(string.format('game:GetService("TeleportService"):TeleportToPlaceInstance(%d, "%s")', game.PlaceId, game.JobId))
+        Library.Notify("Copied")
+    end
+end)
+local gInfo = sMisc:CreateGroupbox("Info", "Right")
+gInfo:AddLabel("Game: " .. game.PlaceId)
+gInfo:AddLabel("Players: " .. #Players:GetPlayers())
+gInfo:AddLabel("User: " .. LocalPlayer.Name)
+
+connect(UserInputService.InputBegan, function(input, gp)
+    if not gp and PanicKey and input.KeyCode == PanicKey then unloadAll() end
+end)
 Library.Notify("Universal loaded - RightControl toggles the menu", 4)
