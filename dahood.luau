@@ -2403,10 +2403,20 @@ silentSnapline.Visible = false
 local LOCK_KEYS = { "Ammo", "MaxAmmo", "ShootingCooldown", "Damage", "Range" }
 local gunLocks = {}
 
-local function desiredValues()
+local origMax = setmetatable({}, { __mode = "k" })
+
+-- Ammo is only ever refilled up to the gun's REAL MaxAmmo; values above it desync from the server and make it drop shots
+local function desiredValues(tool)
+    local ammo
+    if state.infiniteAmmo and tool then
+        if not origMax[tool] then
+            local m = tool:FindFirstChild("MaxAmmo")
+            origMax[tool] = m and m.Value or nil
+        end
+        ammo = origMax[tool]
+    end
     return {
-        Ammo = state.infiniteAmmo and state.maxAmmo or nil,
-        MaxAmmo = state.infiniteAmmo and state.maxAmmo or nil,
+        Ammo = ammo,
         ShootingCooldown = state.rapidFire and state.fireCooldown or nil,
         Damage = state.damageOverride and state.damageValue or nil,
         Range = state.rangeOverride and state.rangeValue or nil,
@@ -2415,7 +2425,7 @@ end
 
 local function pushLocks(tool)
     if not tool or state.unloaded then return end
-    local want = desiredValues()
+    local want = desiredValues(tool)
     for name, val in pairs(want) do
         if val then
             local v = tool:FindFirstChild(name)
@@ -2433,7 +2443,7 @@ local function attachLocks(tool)
         local v = tool:FindFirstChild(name)
         if v and v:IsA("ValueBase") then
             local c = v:GetPropertyChangedSignal("Value"):Connect(function()
-                local want = desiredValues()[name]
+                local want = desiredValues(tool)[name]
                 if want and v.Value ~= want then
                     pcall(function() v.Value = want end)
                 end
@@ -2720,7 +2730,7 @@ local traceWrapper = function(orig, a, b, ...)
 end
 
 local canShootWrapper = function(orig, ...)
-    if not state.unloaded and (state.infiniteAmmo or state.rapidFire) then return true end
+    if not state.unloaded and state.rapidFire then return true end
     return orig(...)
 end
 
@@ -3226,12 +3236,7 @@ track(RunService.Heartbeat:Connect(function()
     local tool = toolEquipped()
     if tool then
         attachLocks(tool)
-        if state.infiniteAmmo then
-            for _, v in ipairs(tool:GetDescendants()) do
-                if v:IsA("IntValue") and v.Name:lower():find("ammo") then v.Value = state.maxAmmo end
-                if v:IsA("NumberValue") and v.Name:lower():find("ammo") then v.Value = state.maxAmmo end
-            end
-        end
+        if state.infiniteAmmo then pushLocks(tool) end
         if state.autoReload then
             local ammo = tool:FindFirstChild("Ammo")
             if ammo and ammo:IsA("ValueBase") and ammo.Value <= 0 then
