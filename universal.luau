@@ -2392,6 +2392,8 @@ local F = {
     InfJump = false, Fly = false, FlySpeed = 70, NoClip = false, Bhop = false,
     Spin = false, SpinSpeed = 30, Fling = false, Orbit = false, OrbitSpeed = 3, OrbitDist = 8,
     Spectate = false, ClickTP = false, AntiAFK = true,
+    Skeleton = false, HeadDot = false, Chams = false, ChamFill = 5, WireChams = false, Rainbow = false,
+    Crosshair = false, CrossSize = 10, Xray = false, Gravity = 196, GravOn = false,
 }
 local TargetPlayer = nil
 
@@ -2445,8 +2447,118 @@ local function removeEsp(e)
     for _, k in ipairs({ "Box", "Text", "Bar", "Tracer" }) do pcall(function() e[k]:Remove() end) end
 end
 
+local BONES = {
+    { "Head", "UpperTorso" }, { "UpperTorso", "LowerTorso" }, { "UpperTorso", "LeftUpperArm" }, { "LeftUpperArm", "LeftLowerArm" },
+    { "LeftLowerArm", "LeftHand" }, { "UpperTorso", "RightUpperArm" }, { "RightUpperArm", "RightLowerArm" }, { "RightLowerArm", "RightHand" },
+    { "LowerTorso", "LeftUpperLeg" }, { "LeftUpperLeg", "LeftLowerLeg" }, { "LeftLowerLeg", "LeftFoot" },
+    { "LowerTorso", "RightUpperLeg" }, { "RightUpperLeg", "RightLowerLeg" }, { "RightLowerLeg", "RightFoot" },
+}
+local BONES6 = {
+    { "Head", "Torso" }, { "Torso", "Left Arm" }, { "Torso", "Right Arm" }, { "Torso", "Left Leg" }, { "Torso", "Right Leg" },
+}
+local SkelLines, HeadDots, Chams = {}, {}, {}
+local chamFolder = Instance.new("Folder")
+chamFolder.Name = "snowcham"
+chamFolder.Parent = (gethui and gethui()) or game:GetService("CoreGui")
+
+local function hideSkel(p)
+    local t = SkelLines[p]
+    if t then for _, l in ipairs(t) do l.Visible = false end end
+    if HeadDots[p] then HeadDots[p].Visible = false end
+end
+local function clearPlayerVisuals(p)
+    if SkelLines[p] then for _, l in ipairs(SkelLines[p]) do pcall(function() l:Remove() end) end SkelLines[p] = nil end
+    if HeadDots[p] then pcall(function() HeadDots[p]:Remove() end) HeadDots[p] = nil end
+    if Chams[p] then Chams[p]:Destroy() Chams[p] = nil end
+end
+
+local function drawSkeleton(p, ch, col)
+    local bones = ch:FindFirstChild("UpperTorso") and BONES or BONES6
+    local lines = SkelLines[p]
+    if not lines then
+        lines = {}
+        for i = 1, #BONES do
+            local l = newDrawing("Line") l.Thickness = 1.5 l.Visible = false
+            lines[i] = l
+        end
+        SkelLines[p] = lines
+    end
+    for i, l in ipairs(lines) do
+        local b = bones[i]
+        local a, c = b and ch:FindFirstChild(b[1]), b and ch:FindFirstChild(b[2])
+        if a and c then
+            local pa, oa = Camera:WorldToViewportPoint(a.Position)
+            local pc, oc = Camera:WorldToViewportPoint(c.Position)
+            if oa and oc then
+                l.From = Vector2.new(pa.X, pa.Y) l.To = Vector2.new(pc.X, pc.Y) l.Color = col l.Visible = true
+            else l.Visible = false end
+        else l.Visible = false end
+    end
+end
+
+local function updateChams(p, ch, col, on)
+    local h = Chams[p]
+    if not on then
+        if h then h.Enabled = false end
+        return
+    end
+    if not h or h.Adornee ~= ch then
+        if h then h:Destroy() end
+        h = Instance.new("Highlight")
+        h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        h.Adornee = ch
+        h.Parent = chamFolder
+        Chams[p] = h
+    end
+    h.Enabled = true
+    h.FillColor = col
+    h.OutlineColor = F.WireChams and col or Color3.new(1, 1, 1)
+    h.FillTransparency = F.WireChams and 1 or (1 - F.ChamFill / 10)
+    h.OutlineTransparency = 0
+end
+
+local rainbowHue = 0
+local crossH, crossV = newDrawing("Line"), newDrawing("Line")
+crossH.Thickness = 1.5 crossV.Thickness = 1.5
+
 connect(RunService.RenderStepped, function()
     EspFrame = EspFrame + 1
+    rainbowHue = (rainbowHue + 0.004) % 1
+    local rb = Color3.fromHSV(rainbowHue, 0.8, 1)
+    local vc = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    crossH.Visible = F.Crosshair and not isMenuVisible
+    crossV.Visible = crossH.Visible
+    if crossH.Visible then
+        crossH.From = vc - Vector2.new(F.CrossSize, 0) crossH.To = vc + Vector2.new(F.CrossSize, 0) crossH.Color = rb
+        crossV.From = vc - Vector2.new(0, F.CrossSize) crossV.To = vc + Vector2.new(0, F.CrossSize) crossV.Color = rb
+    end
+    for _, p in ipairs(otherPlayers()) do
+        local ch = p.Character
+        local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+        local ok = ch and hum and hum.Health > 0 and (F.EspTeam or p.Team ~= LocalPlayer.Team or p.Team == nil)
+        local col = F.Rainbow and rb or (p.TeamColor and p.TeamColor.Color or Color3.fromRGB(120, 190, 255))
+        if ok then
+            updateChams(p, ch, col, F.Chams or F.WireChams)
+            local head = ch:FindFirstChild("Head")
+            if F.Skeleton then drawSkeleton(p, ch, col) else hideSkel(p) end
+            if F.HeadDot and head then
+                local d = HeadDots[p]
+                if not d then d = newDrawing("Circle") d.Thickness = 1.5 d.NumSides = 20 d.Filled = false HeadDots[p] = d end
+                local pos, on = Camera:WorldToViewportPoint(head.Position)
+                d.Visible = on and not isMenuVisible
+                d.Position = Vector2.new(pos.X, pos.Y)
+                d.Radius = math.clamp(250 / math.max(pos.Z, 1), 3, 20)
+                d.Color = col
+            elseif HeadDots[p] then HeadDots[p].Visible = false end
+            if isMenuVisible then hideSkel(p) end
+        else
+            hideSkel(p)
+            if Chams[p] then Chams[p].Enabled = false end
+        end
+    end
+    for p in pairs(SkelLines) do if not p.Parent then clearPlayerVisuals(p) end end
+    for p in pairs(Chams) do if not p.Parent then clearPlayerVisuals(p) end end
+    if F.GravOn then Workspace.Gravity = F.Gravity end
     local myRoot = getRoot()
     if F.ESP and not isMenuVisible then
         for _, p in ipairs(otherPlayers()) do
@@ -2629,10 +2741,34 @@ tog(g1, "Boxes", "EspBox")
 tog(g1, "Names", "EspName")
 tog(g1, "Health Bars", "EspHealth")
 tog(g1, "Tracers", "EspTracer")
+tog(g1, "Skeleton", "Skeleton", true)
+tog(g1, "Head Dot", "HeadDot")
+tog(g1, "Rainbow Colors", "Rainbow")
+local gC = sEsp:CreateGroupbox("Chams", "Right")
+tog(gC, "Chams (through walls)", "Chams", true)
+tog(gC, "Wireframe Chams (outline only)", "WireChams", true)
+sld(gC, "Fill Opacity (x10%)", 0, 10, "ChamFill")
 tog(g1, "Show Teammates", "EspTeam")
 sld(g1, "Max Distance", 100, 5000, "EspRange", " studs")
 local g2 = sWorld:CreateGroupbox("Environment", "Left")
 g2:AddToggle("Fullbright", false, { HasKeybind = true, Callback = function(v) F.Fullbright = v if not v then restoreLighting() end end })
+g2:AddToggle("X-Ray (see through walls)", false, { Callback = function(v)
+    F.Xray = v
+    for _, d in ipairs(Workspace:GetDescendants()) do
+        if d:IsA("BasePart") and not d:IsDescendantOf(Players) then
+            local isChar = false
+            for _, pl in ipairs(Players:GetPlayers()) do
+                if pl.Character and d:IsDescendantOf(pl.Character) then isChar = true break end
+            end
+            if not isChar then
+                if v then d:SetAttribute("snowT", d.LocalTransparencyModifier) d.LocalTransparencyModifier = 0.6
+                else d.LocalTransparencyModifier = 0 end
+            end
+        end
+    end
+end })
+g2:AddToggle("Crosshair", false, { Callback = function(v) F.Crosshair = v end })
+sld(g2, "Crosshair Size", 4, 30, "CrossSize")
 g2:AddToggle("Remove Fog", false, { Callback = function(v) F.NoFog = v if not v then restoreLighting() end end })
 tog(g2, "Custom FOV", "FovOn")
 sld(g2, "FOV", 30, 120, "FOV")
@@ -2646,6 +2782,8 @@ g3:AddDropdown("Mode", { "CFrame", "WalkSpeed" }, F.SpeedMode, function(v) F.Spe
 tog(g3, "Jump Power", "JumpOn")
 sld(g3, "Power", 50, 300, "JumpPower")
 tog(g3, "Bunny Hop (hold Space)", "Bhop")
+tog(g3, "Custom Gravity", "GravOn")
+sld(g3, "Gravity", 0, 300, "Gravity")
 local g4 = sMove:CreateGroupbox("Flight & Collision", "Right")
 tog(g4, "Fly (WASD / Space / Shift)", "Fly", true)
 sld(g4, "Fly Speed", 20, 300, "FlySpeed")
@@ -2700,6 +2838,11 @@ g9:AddButton("Rejoin Server", function() game:GetService("TeleportService"):Tele
 g9:AddButton("Unload Script", function()
     Running = false
     for _, e in pairs(EspPool) do removeEsp(e) end
+    for p in pairs(SkelLines) do clearPlayerVisuals(p) end
+    for p in pairs(Chams) do clearPlayerVisuals(p) end
+    pcall(function() crossH:Remove() crossV:Remove() end)
+    pcall(function() chamFolder:Destroy() end)
+    Workspace.Gravity = 196.2
     for _, c in ipairs(Connections) do pcall(function() c:Disconnect() end) end
     for k, v in pairs(F) do if type(v) == "boolean" then F[k] = false end end
     restoreLighting()
