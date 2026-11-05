@@ -2835,7 +2835,7 @@ local HttpService = game:GetService("HttpService")
 local CFG_FILE = "snowcc_universal.json"
 local function setF(k, v)
     F[k] = v
-    if H[k] and H[k].SetValue then pcall(H[k].SetValue, H[k], v) end
+    if H[k] and H[k].SetValue then pcall(H[k].SetValue, v) end
 end
 local function saveConfig()
     if not writefile then Library.Notify("Executor has no writefile") return end
@@ -3079,4 +3079,4 @@ gInfo:AddLabel("User: " .. LocalPlayer.Name)
 connect(UserInputService.InputBegan, function(input, gp)
     if not gp and PanicKey and input.KeyCode == PanicKey then unloadAll() end
 end)
-Library.Notify("Universal loaded - RightControl toggles the menu", 4)
+Library.Notify("Universal v5 loaded (Lobby tab = 3rd in sidebar) - RightControl toggles", 5)
