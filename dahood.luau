@@ -156,17 +156,21 @@ end
 local function findTarget(partName, fov, teamCheck, visCheck, fromPoint)
     local best, bestDist = nil, math.huge
     local mpos = fromPoint or cursorPoint()
+    local myChar = getChar()
     for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LP and alive(plr) then
-            local skip = teamCheck and plr.Team ~= nil and LP.Team ~= nil and plr.Team == LP.Team
-            if not skip then
-                local part = getPart(plr, partName)
-                if part then
-                    local sp, on = cam():WorldToViewportPoint(part.Position)
-                    if on then
-                        local d = (mpos - Vector2.new(sp.X, sp.Y)).Magnitude
-                        if d <= fov and d < bestDist and (not visCheck or visible(part)) then
-                            best, bestDist = plr, d
+        if plr ~= LP and plr.UserId ~= LP.UserId and plr.Name ~= LP.Name and alive(plr) then
+            local char = plr.Character
+            if char and char ~= myChar and not (myChar and char:IsDescendantOf(myChar)) then
+                local skip = teamCheck and plr.Team ~= nil and LP.Team ~= nil and plr.Team == LP.Team
+                if not skip then
+                    local part = getPart(plr, partName)
+                    if part and part.Parent ~= myChar then
+                        local sp, on = cam():WorldToViewportPoint(part.Position)
+                        if on and sp.Z > 0 then
+                            local d = (mpos - Vector2.new(sp.X, sp.Y)).Magnitude
+                            if d <= fov and d < bestDist and (not visCheck or visible(part)) then
+                                best, bestDist = plr, d
+                            end
                         end
                     end
                 end
@@ -2502,6 +2506,13 @@ local function split(a, b)
 end
 
 local function callOrig(orig, self, first, ...)
+    if type(orig) ~= "function" then
+        if GunHandler and type(GunHandler.Shoot) == "function" then
+            orig = GunHandler.Shoot
+        else
+            return nil
+        end
+    end
     if self then return orig(self, first, ...) end
     return orig(first, ...)
 end
@@ -2549,10 +2560,17 @@ local function install(name, wrapper)
         GunHandler[name] = function(...) return wrapper(fn, ...) end
         return true
     end
-    local ok, orig = pcall(function()
-        return hookfunction(fn, function(...) return wrapper(orig, ...) end)
+    local orig = nil
+    local hookOk = pcall(function()
+        local res = hookfunction(fn, function(...)
+            local targetFn = orig or originals[name] or fn
+            return wrapper(targetFn, ...)
+        end)
+        if type(res) == "function" then
+            orig = res
+        end
     end)
-    if not ok or type(orig) ~= "function" then
+    if not hookOk or type(orig) ~= "function" then
         originals[name] = fn
         GunHandler[name] = function(...) return wrapper(fn, ...) end
         return true
