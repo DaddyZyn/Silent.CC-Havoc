@@ -64,7 +64,7 @@ local state = {
     aimSnaplineColor = Color3.fromRGB(0, 175, 255),
     trigger = false, triggerDelay = 0.08, triggerPart = "Head", triggerFov = 150, triggerTeamCheck = true,
     silent = false, silentFov = 300, silentPart = "HumanoidRootPart", silentChance = 100,
-    silentTeamCheck = true, wallbangMode = "Off", silentPrediction = true,
+    silentTeamCheck = true, wallbangMode = "Off", silentPrediction = true, silentPredictionFactor = 1,
     knockCheck = true, adaptiveHitbox = false, spreadCondenser = true,
     silentCircle = false, silentColor = Color3.fromRGB(0, 200, 255), silentCircleY = 0,
     silentSnapline = false, silentSnaplineOrigin = "Gun", silentSnaplineWidth = 1,
@@ -74,7 +74,7 @@ local state = {
     damageOverride = false, damageValue = 100,
     rangeOverride = false, rangeValue = 500,
     esp = false, espBox = true, espName = true, espHealth = true, espHealthBar = true, espDist = true,
-    espTracer = false, espTool = true, espMaxDist = 1500, espChams = false,
+    espTracer = false, espTracerOrigin = "Bottom", espTool = true, espMaxDist = 1500, espChams = false,
     espEnemy = Color3.fromRGB(255, 60, 60), espTeam = Color3.fromRGB(60, 255, 120),
     speed = false, speedValue = 24, speedMode = "CFrame", jump = false, jumpValue = 55,
     hipHeight = false, hipValue = 2, fly = false, flySpeed = 60,
@@ -162,7 +162,11 @@ local function predict(part, factor, mode)
     local usePred = (mode == "aim" and state.aimPrediction) or (mode == "silent" and state.silentPrediction)
     if not mode then usePred = state.aimPrediction or state.silentPrediction end
     if not usePred then return part.Position end
-    return part.Position + (part.AssemblyLinearVelocity * ((smoothPing() / 1000) * (factor or 1)))
+    local mult = factor or 1
+    if mode == "silent" and state.silentPredictionFactor then
+        mult = mult * state.silentPredictionFactor
+    end
+    return part.Position + (part.AssemblyLinearVelocity * ((smoothPing() / 1000) * mult))
 end
 local InVisRay = false
 local function visible(part)
@@ -1243,35 +1247,51 @@ function Library.CreateWindow(config)
                     end)
 
                     UserInputService.InputBegan:Connect(function(input, gpe)
-                        if not listening then return end
-                        if tick() - listenStartTime < 0.12 then return end
+                        if listening then
+                            if tick() - listenStartTime < 0.12 then return end
+                            local chosen = nil
+                            if input.UserInputType == Enum.UserInputType.Keyboard then
+                                if input.KeyCode == Enum.KeyCode.Escape then
+                                    keybindBtn.Text = formatKeyName(currentKey)
+                                    keybindBtn.TextColor3 = Library.Theme.MutedText
+                                    listening = false
+                                    return
+                                elseif input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
+                                    chosen = nil
+                                else
+                                    chosen = input.KeyCode
+                                end
+                            elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+                                chosen = Enum.UserInputType.MouseButton1
+                            elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+                                chosen = Enum.UserInputType.MouseButton2
+                            elseif input.UserInputType == Enum.UserInputType.MouseButton3 then
+                                chosen = Enum.UserInputType.MouseButton3
+                            end
 
-                        local chosen = nil
-                        if input.UserInputType == Enum.UserInputType.Keyboard then
-                            if input.KeyCode == Enum.KeyCode.Escape then
+                            if chosen ~= nil or input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
+                                currentKey = chosen
                                 keybindBtn.Text = formatKeyName(currentKey)
                                 keybindBtn.TextColor3 = Library.Theme.MutedText
                                 listening = false
-                                return
-                            elseif input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
-                                chosen = nil
-                            else
-                                chosen = input.KeyCode
+                                if onKeyChanged then pcall(onKeyChanged, currentKey) end
                             end
-                        elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
-                            chosen = Enum.UserInputType.MouseButton1
-                        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-                            chosen = Enum.UserInputType.MouseButton2
-                        elseif input.UserInputType == Enum.UserInputType.MouseButton3 then
-                            chosen = Enum.UserInputType.MouseButton3
+                            return
                         end
 
-                        if chosen ~= nil or input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
-                            currentKey = chosen
-                            keybindBtn.Text = formatKeyName(currentKey)
-                            keybindBtn.TextColor3 = Library.Theme.MutedText
-                            listening = false
-                            if onKeyChanged then pcall(onKeyChanged, currentKey) end
+                        -- Trigger toggle when keybind is pressed in-game
+                        if not gpe and currentKey ~= nil and UserInputService:GetFocusedTextBox() == nil then
+                            local matched = false
+                            if typeof(currentKey) == "EnumItem" then
+                                if currentKey.EnumType == Enum.KeyCode and input.KeyCode == currentKey then
+                                    matched = true
+                                elseif currentKey.EnumType == Enum.UserInputType and input.UserInputType == currentKey then
+                                    matched = true
+                                end
+                            end
+                            if matched then
+                                toggleState()
+                            end
                         end
                     end)
                 end
@@ -1346,35 +1366,50 @@ function Library.CreateWindow(config)
                 end)
 
                 UserInputService.InputBegan:Connect(function(input, gpe)
-                    if not listening then return end
-                    if tick() - listenStartTime < 0.12 then return end
+                    if listening then
+                        if tick() - listenStartTime < 0.12 then return end
+                        local chosen = nil
+                        if input.UserInputType == Enum.UserInputType.Keyboard then
+                            if input.KeyCode == Enum.KeyCode.Escape then
+                                keyBtn.Text = formatKeyName(currentKey)
+                                keyBtn.TextColor3 = Library.Theme.MutedText
+                                listening = false
+                                return
+                            elseif input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
+                                chosen = nil
+                            else
+                                chosen = input.KeyCode
+                            end
+                        elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+                            chosen = Enum.UserInputType.MouseButton1
+                        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+                            chosen = Enum.UserInputType.MouseButton2
+                        elseif input.UserInputType == Enum.UserInputType.MouseButton3 then
+                            chosen = Enum.UserInputType.MouseButton3
+                        end
 
-                    local chosen = nil
-                    if input.UserInputType == Enum.UserInputType.Keyboard then
-                        if input.KeyCode == Enum.KeyCode.Escape then
+                        if chosen ~= nil or input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
+                            currentKey = chosen
                             keyBtn.Text = formatKeyName(currentKey)
                             keyBtn.TextColor3 = Library.Theme.MutedText
                             listening = false
-                            return
-                        elseif input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
-                            chosen = nil
-                        else
-                            chosen = input.KeyCode
+                            if callback then pcall(callback, currentKey) end
                         end
-                    elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
-                        chosen = Enum.UserInputType.MouseButton1
-                    elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-                        chosen = Enum.UserInputType.MouseButton2
-                    elseif input.UserInputType == Enum.UserInputType.MouseButton3 then
-                        chosen = Enum.UserInputType.MouseButton3
+                        return
                     end
 
-                    if chosen ~= nil or input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
-                        currentKey = chosen
-                        keyBtn.Text = formatKeyName(currentKey)
-                        keyBtn.TextColor3 = Library.Theme.MutedText
-                        listening = false
-                        if callback then pcall(callback, currentKey) end
+                    if not gpe and currentKey ~= nil and UserInputService:GetFocusedTextBox() == nil then
+                        local matched = false
+                        if typeof(currentKey) == "EnumItem" then
+                            if currentKey.EnumType == Enum.KeyCode and input.KeyCode == currentKey then
+                                matched = true
+                            elseif currentKey.EnumType == Enum.UserInputType and input.UserInputType == currentKey then
+                                matched = true
+                            end
+                        end
+                        if matched and callback then
+                            pcall(callback, currentKey)
+                        end
                     end
                 end)
 
@@ -2462,8 +2497,8 @@ end
 
 local function fillParams(params, part, pos)
     pos = pos or predict(part, 1)
+    local origin = params.Origin or params.ForcedOrigin
     local tool = toolEquipped()
-    local origin = params.ForcedOrigin or params.Origin
     if typeof(origin) ~= "Vector3" then
         if tool then
             local p = tool:FindFirstChild("Muzzle") or tool:FindFirstChild("Handle") or tool:FindFirstChildWhichIsA("BasePart")
@@ -2489,23 +2524,19 @@ local function fillParams(params, part, pos)
     params.Hit = part
     params.Target = part
 
-    if state.rangeOverride then
-        params.Range = state.rangeValue
-    elseif params.Range ~= nil and params.Range < dist + 10 then
-        -- Guarantee weapon range covers the target so server check passes
-        params.Range = dist + 50
-    end
-
+    -- Keep original weapon origin clean so Zee Hood server distance check passes
     if state.wallbangMode == "Hard" then
         local back = origin - pos
         if back.Magnitude > 0.01 then
             params.ForcedOrigin = pos + back.Unit * 1.5
         end
+    elseif params.Origin ~= nil then
+        params.ForcedOrigin = params.Origin
     end
 
     local pre = params.Precomputed
     if typeof(pre) == "CFrame" then
-        params.Precomputed = CFrame.lookAt(pos, pos + dir)
+        params.Precomputed = CFrame.lookAt(origin, pos)
     elseif typeof(pre) == "Vector3" then
         params.Precomputed = pos
     elseif type(pre) == "table" then
@@ -2621,22 +2652,19 @@ local shootWrapper = function(orig, a, b, ...)
     local res = table.pack(callOrig(orig, self, params, ...))
 
     if part and cachedPos and cachedDir then
-        if res.n >= 3 then
-            res[1] = cachedPos
-            res[2] = part
-            res[3] = -cachedDir
-        else
-            for i = 1, res.n do
-                local v = res[i]
-                local tv = typeof(v)
-                if tv == "Vector3" then
-                    res[i] = cachedPos
-                elseif tv == "Instance" then
-                    res[i] = part
-                elseif type(v) == "table" then
-                    pcall(patchDeep, v, part, cachedDir, cachedPos, 0)
-                end
+        for i = 1, res.n do
+            local v = res[i]
+            local tv = typeof(v)
+            if tv == "Vector3" then
+                res[i] = cachedPos
+            elseif tv == "Instance" then
+                res[i] = part
+            elseif type(v) == "table" then
+                pcall(patchDeep, v, part, cachedDir, cachedPos, 0)
             end
+        end
+        if res.n >= 2 and typeof(res[2]) ~= "Instance" then
+            res[2] = part
         end
     end
 
@@ -2848,7 +2876,14 @@ local function renderESP()
 
     local camPos = cam().CFrame.Position
     local vp = cam().ViewportSize
-    local centre = Vector2.new(vp.X / 2, vp.Y)
+    local tracerOrigin = Vector2.new(vp.X / 2, vp.Y)
+    if state.espTracerOrigin == "Top" then
+        tracerOrigin = Vector2.new(vp.X / 2, 0)
+    elseif state.espTracerOrigin == "Middle" then
+        tracerOrigin = Vector2.new(vp.X / 2, vp.Y / 2)
+    elseif state.espTracerOrigin == "Mouse" then
+        tracerOrigin = cursorPoint()
+    end
 
     for plr, t in pairs(espData) do
         local char = plr.Character
@@ -2913,8 +2948,8 @@ local function renderESP()
 
                 t.tracer.Visible = state.espTracer
                 t.tracer.Color = col
-                t.tracer.From = centre
-                t.tracer.To = Vector2.new(top.X, y + h)
+                t.tracer.From = tracerOrigin
+                t.tracer.To = Vector2.new(x + w / 2, y + h)
             else
                 hideESP(t)
             end
@@ -2962,33 +2997,40 @@ local function applyCharacter()
     local root = getRoot()
     if not char or not hum or not root then return end
 
+    -- Speed
     if state.speed then
         if state.speedMode == "CFrame" then
-            hum.WalkSpeed = 16
             local moveDir = hum.MoveDirection
             if moveDir.Magnitude > 0 then
-                root.CFrame = root.CFrame + moveDir.Unit * (state.speedValue / 60)
+                root.CFrame = root.CFrame + moveDir.Unit * (state.speedValue / 50)
             end
         else
             hum.WalkSpeed = state.speedValue
         end
-    else
-        hum.WalkSpeed = 16
     end
+
+    -- Jump Power / Jump Height
     if state.jump then
         hum.UseJumpPower = true
         hum.JumpPower = state.jumpValue
+        pcall(function() hum.JumpHeight = state.jumpValue / 7 end)
     end
+
+    -- Hip Height
     if state.hipHeight then
         pcall(function() hum.HipHeight = state.hipValue end)
     end
 
+    -- Noclip (Sets CanCollide false across entire character)
     if state.noclip then
         for _, p in ipairs(char:GetDescendants()) do
-            if p:IsA("BasePart") and p.CanCollide then p.CanCollide = false end
+            if p:IsA("BasePart") then
+                p.CanCollide = false
+            end
         end
     end
 
+    -- Fly
     if state.fly and not flyBV then
         flyBV = Instance.new("BodyVelocity")
         flyBV.Name = "SnowFly"
@@ -3274,6 +3316,8 @@ register("silent.chance", silChance.SetValue, 100)
 SilentGroup:AddToggle("Team Check", true, { Callback = function(v) state.silentTeamCheck = v end })
 SilentGroup:AddDropdown("Wallbang", { "Off", "Soft", "Hard" }, "Off", function(v) state.wallbangMode = v end)
 SilentGroup:AddToggle("Prediction", true, { Callback = function(v) state.silentPrediction = v end })
+local silPredSlider = SilentGroup:AddSlider("Prediction Factor", 0, 200, 100, "%", function(v) state.silentPredictionFactor = v / 100 end)
+register("silent.predfactor", silPredSlider.SetValue, 100)
 SilentGroup:AddToggle("Show FOV Circle", false, { Callback = function(v) state.silentCircle = v end })
 SilentGroup:AddColorPicker("Circle Colour", Color3.fromRGB(0, 200, 255), function(c) state.silentColor = c end)
 
@@ -3313,6 +3357,7 @@ EspGroup:AddToggle("Health Bar", true, { Callback = function(v) state.espHealthB
 EspGroup:AddToggle("Distance", true, { Callback = function(v) state.espDist = v end })
 EspGroup:AddToggle("Equipped Tool", true, { Callback = function(v) state.espTool = v end })
 EspGroup:AddToggle("Tracer", false, { Callback = function(v) state.espTracer = v end })
+EspGroup:AddDropdown("Tracer Origin", { "Bottom", "Top", "Middle", "Mouse" }, "Bottom", function(v) state.espTracerOrigin = v end)
 EspGroup:AddToggle("Chams", false, { Callback = function(v) state.espChams = v end })
 local distS = EspGroup:AddSlider("Max Distance", 100, 5000, 1500, "m", function(v) state.espMaxDist = v end)
 register("esp.maxdist", distS.SetValue, 1500)
