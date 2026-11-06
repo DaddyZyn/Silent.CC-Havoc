@@ -2719,11 +2719,17 @@ end
 
 local traceWrapper = function(orig, a, b, ...)
     local self, first = split(a, b)
-    if not state.unloaded and state.wallbangMode == "Hard" then
-        local part = liveSilentPart()
+    if not state.unloaded and state.silent then
+        local part, pos = liveSilentPart()
         if part then
-            local o = typeof(first) == "table" and first.ForcedOrigin or nil
-            return forcedTrace(part, o)
+            if state.wallbangMode == "Hard" then
+                local o = typeof(first) == "table" and first.ForcedOrigin or nil
+                return forcedTrace(part, o)
+            end
+            -- report the real character limb (not the Hitbox helper part) so the server accepts the hit
+            local o = typeof(first) == "table" and typeof(first.ForcedOrigin) == "Vector3" and first.ForcedOrigin or cam().CFrame.Position
+            local d = pos - o
+            if d.Magnitude > 0.01 then return pos, part, -d.Unit end
         end
     end
     return callOrig(orig, self, first, ...)
