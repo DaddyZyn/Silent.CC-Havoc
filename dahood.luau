@@ -16,6 +16,7 @@ local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Lighting = game:GetService("Lighting")
 local HttpService = game:GetService("HttpService")
+local SoundService = game:GetService("SoundService")
 local VirtualUser = game:GetService("VirtualUser")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local TeleportService = game:GetService("TeleportService")
@@ -48,11 +49,6 @@ local function cursorPoint()
     return Vector2.new(Mouse.X, Mouse.Y)
 end
 
-local function screenCentre()
-    local vp = cam().ViewportSize
-    return Vector2.new(vp.X / 2, vp.Y / 2)
-end
-
 --=====================================================================
 -- STATE / HELPERS
 --=====================================================================
@@ -63,34 +59,62 @@ local state = {
     aimSnapline = false, aimSnaplineOrigin = "Gun", aimSnaplineWidth = 1,
     aimSnaplineColor = Color3.fromRGB(0, 175, 255),
     trigger = false, triggerDelay = 0.08, triggerPart = "Head", triggerFov = 150, triggerTeamCheck = true,
-    silent = false, silentFov = 300, silentPart = "HumanoidRootPart", silentChance = 100,
-    silentTeamCheck = true, wallbangMode = "Off", silentPrediction = true, silentPredictionFactor = 1,
+    silent = false, silentFov = 300, silentPart = "Hitbox", silentChance = 100,
+    silentTeamCheck = true, wallbangMode = "Remote", silentPrediction = true, silentPredictionFactor = 1,
+    silentVisibleOnly = false, wallbangMax = 28, shiftHandle = true, debugShots = false,
     knockCheck = true, adaptiveHitbox = false, spreadCondenser = true,
     silentCircle = false, silentColor = Color3.fromRGB(0, 200, 255), silentCircleY = 0,
     silentSnapline = false, silentSnaplineOrigin = "Gun", silentSnaplineWidth = 1,
     silentSnaplineColor = Color3.fromRGB(0, 200, 255),
+    antiAimViewer = false, antiAimColor = Color3.fromRGB(0, 200, 255), antiAimLength = 80,
     autoReload = false, infiniteAmmo = false, maxAmmo = 999, autoAttack = false, attackRange = 14,
     rapidFire = false, fireCooldown = 0.03,
     damageOverride = false, damageValue = 100,
     rangeOverride = false, rangeValue = 500,
-    esp = false, espBox = true, espName = true, espHealth = true, espHealthBar = true, espDist = true,
+    esp = false, espBox = true, espBoxStyle = "Full", espName = true, espHealth = true,
+    espHealthBar = true, espDist = true,
     espTracer = false, espTracerOrigin = "Bottom", espTool = true, espMaxDist = 1500, espChams = false,
+    espOutline = true, espSkeleton = false,
     espEnemy = Color3.fromRGB(255, 60, 60), espTeam = Color3.fromRGB(60, 255, 120),
     speed = false, speedValue = 24, speedMode = "CFrame", jump = false, jumpValue = 55,
     hipHeight = false, hipValue = 2, fly = false, flySpeed = 60,
+    flyVertical = false, flySmooth = 11,
+    spinbot = false, spinSpeed = 720, spinAxis = "Yaw",
+    tracer = false, tracerStyle = "Line", tracerColor = Color3.fromRGB(255, 220, 90),
+    tracerWidth = 2, tracerLife = 0.35,
+    gunGlow = false, gunGlowColor = Color3.fromRGB(0, 200, 255), gunGlowRainbow = false,
+    charGlow = false, charGlowColor = Color3.fromRGB(0, 200, 255), charGlowRainbow = false,
+    rainbowSpeed = 30,
+    hat = false, hatColor = Color3.fromRGB(255, 210, 90), hatRainbow = true,
+    hatSize = 1, hatTransparency = 0.35, hatHeight = 0,
+    hitSound = false, hitSoundId = "", hitSoundVolume = 0.6, hitSoundPitch = 1,
+    skyPreset = "Default", skyCustom = "", skyStars = 3000, skySun = true,
     noclip = false, infJump = false, antiAfk = true,
+    tpOffset = 4,
     fullbright = false, noFog = false,
+    hookMode = "Off",
     unloaded = false,
 }
 
-local flags, setters = {}, {}
-local function register(key, setter, initial)
-    flags[key] = initial
-    setters[key] = setter
+-- Every group of related state lives in one table. The chunk sits hard against
+-- Luau's 200 local register ceiling, so a dozen siblings are worth more than the
+-- readability they cost, and a new feature has to share a slot rather than take
+-- a fresh one.
+local reg = { flags = {}, setters = {}, getters = {} }
+local function register(key, ctl, initial)
+    reg.flags[key] = initial
+    reg.setters[key] = ctl.SetValue
+    reg.getters[key] = ctl.GetValue
 end
 
-local conns = {}
-local function track(c) table.insert(conns, c) return c end
+local con = { live = {}, ui = {} }
+local function track(c) table.insert(con.live, c) return c end
+
+-- UI input connections live on UserInputService, so they outlive the ScreenGui.
+-- They are collected separately and cut on unload.
+local function uiconn(c) table.insert(con.ui, c) return c end
+
+local Window
 
 local function getChar() return LP.Character end
 local function getHum()
@@ -122,20 +146,104 @@ local function alive(plr)
     local c = plr and plr.Character
     local h = c and c:FindFirstChildOfClass("Humanoid")
     if not (h ~= nil and h.Health > 0) then return false end
-    if state.knockCheck and isKnocked(c) then return false end
+    if state.knockCheck then
+        if isKnocked(c) then return false end
+        local be = c:FindFirstChild("BodyEffects")
+        local d = be and be:FindFirstChild("Dead")
+        if d and d.Value then return false end
+    end
     return true
 end
+
+-- Zee Hood has no Roblox teams; it tags players with a BRTeam attribute and
+-- keeps crew membership under DataFolder.Information.Crew.
+local function sameTeam(plr)
+    local myBR, theirBR = LP:GetAttribute("BRTeam"), plr:GetAttribute("BRTeam")
+    if myBR ~= nil and theirBR ~= nil then return myBR == theirBR end
+    if LP.Team ~= nil and plr.Team ~= nil then return LP.Team == plr.Team end
+    return false
+end
+
+-- Declared above getPart: a local function referenced from an earlier
+-- definition compiles to a global there and would be nil at call time.
+local InVisRay = false
+
+-- RaycastParams are rebuilt dozens of times per frame, so the three sets are
+-- allocated once and only their filter lists are rewritten.
+local rp = {
+    vis = RaycastParams.new(),
+    los = RaycastParams.new(),
+    inc = RaycastParams.new(),
+}
+rp.vis.FilterType = Enum.RaycastFilterType.Exclude
+rp.los.FilterType = Enum.RaycastFilterType.Exclude
+rp.inc.FilterType = Enum.RaycastFilterType.Include
+
+local function visible(part)
+    local ignore = { LP.Character }
+    if part.Parent then table.insert(ignore, part.Parent) end
+    rp.vis.FilterDescendantsInstances = ignore
+    InVisRay = true
+    local res = workspace:Raycast(cam().CFrame.Position, part.Position - cam().CFrame.Position, rp.vis)
+    InVisRay = false
+    return res == nil
+end
+
+local function losParams(part)
+    rp.los.FilterDescendantsInstances = { part.Parent, LP.Character }
+    return rp.los
+end
+
+local function incParams(part)
+    rp.inc.FilterDescendantsInstances = { part.Parent }
+    return rp.inc
+end
+
+-- Ordered by preference for "Closest": body first, the oversized Hitbox last so
+-- it only wins when it genuinely is the nearest thing under the crosshair.
+local CLOSEST_CANDIDATES = {
+    "Head", "UpperTorso", "LowerTorso", "Torso", "HumanoidRootPart",
+    "LeftUpperArm", "LeftLowerArm", "LeftHand",
+    "RightUpperArm", "RightLowerArm", "RightHand",
+    "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
+    "RightUpperLeg", "RightLowerLeg", "RightFoot",
+    "Left Arm", "Right Arm", "Left Leg", "Right Leg",
+    "Hitbox",
+}
+
+local function closestPart(c)
+    local mpos = cursorPoint()
+    local best, bestD = nil, math.huge
+    for _, n in ipairs(CLOSEST_CANDIDATES) do
+        local p = c:FindFirstChild(n)
+        if p and p:IsA("BasePart") then
+            local sp, on = cam():WorldToViewportPoint(p.Position)
+            if on and sp.Z > 0 then
+                local d = (mpos - Vector2.new(sp.X, sp.Y)).Magnitude
+                if d < bestD then best, bestD = p, d end
+            end
+        end
+    end
+    return best
+end
+
 local function getPart(plr, name)
     local c = plr and plr.Character
     if not c then return nil end
+    if name == "Closest" then
+        local p = closestPart(c)
+        if p then return p end
+    end
     if (state.adaptiveHitbox or name == "Adaptive") then
-        local candidates = { "Head", "UpperTorso", "HumanoidRootPart", "LowerTorso" }
+        local candidates = { "Hitbox", "Head", "UpperTorso", "HumanoidRootPart", "LowerTorso" }
         for _, n in ipairs(candidates) do
             local p = c:FindFirstChild(n)
             if p and p:IsA("BasePart") and visible(p) then return p end
         end
     end
     local p = c:FindFirstChild(name)
+    if p and p:IsA("BasePart") then return p end
+    p = c:FindFirstChild("Hitbox")
     if p and p:IsA("BasePart") then return p end
     p = c:FindFirstChild("Head")
     if p and p:IsA("BasePart") then return p end
@@ -144,19 +252,16 @@ end
 local function mouseFree()
     return UserInputService:GetFocusedTextBox() == nil
 end
-local function ping()
-    return smoothPing()
-end
-local cachedPing, cachedPingAt = 60, 0
+local pings = { v = 60, at = 0 }
 local function smoothPing()
-    if os.clock() - cachedPingAt > 0.2 then
-        cachedPingAt = os.clock()
+    if os.clock() - pings.at > 0.2 then
+        pings.at = os.clock()
         local ok, v = pcall(function()
             return game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()
         end)
-        cachedPing = ok and v or cachedPing
+        pings.v = ok and v or pings.v
     end
-    return cachedPing
+    return pings.v
 end
 local function predict(part, factor, mode)
     local usePred = (mode == "aim" and state.aimPrediction) or (mode == "silent" and state.silentPrediction)
@@ -168,31 +273,19 @@ local function predict(part, factor, mode)
     end
     return part.Position + (part.AssemblyLinearVelocity * ((smoothPing() / 1000) * mult))
 end
-local InVisRay = false
-local function visible(part)
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    local ignore = { LP.Character }
-    if part.Parent then table.insert(ignore, part.Parent) end
-    params.FilterDescendantsInstances = ignore
-    InVisRay = true
-    local res = workspace:Raycast(cam().CFrame.Position, part.Position - cam().CFrame.Position, params)
-    InVisRay = false
-    return res == nil
-end
-local function ignoreVis()
-    return state.wallbangMode == "Off"
-end
 
+-- The part that was actually scored is returned alongside the player, so the
+-- caller never re-resolves a different bone than the one the FOV test used.
+-- findTarget's visCheck: true means the target must be in line of sight.
 local function findTarget(partName, fov, teamCheck, visCheck, fromPoint)
-    local best, bestDist = nil, math.huge
+    local best, bestDist, bestPart = nil, math.huge, nil
     local mpos = fromPoint or cursorPoint()
     local myChar = getChar()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LP and plr.UserId ~= LP.UserId and plr.Name ~= LP.Name and alive(plr) then
             local char = plr.Character
             if char and char ~= myChar and not (myChar and char:IsDescendantOf(myChar)) then
-                local skip = teamCheck and plr.Team ~= nil and LP.Team ~= nil and plr.Team == LP.Team
+                local skip = teamCheck and sameTeam(plr)
                 if not skip then
                     local part = getPart(plr, partName)
                     if part and part.Parent ~= myChar then
@@ -200,7 +293,7 @@ local function findTarget(partName, fov, teamCheck, visCheck, fromPoint)
                         if on and sp.Z > 0 then
                             local d = (mpos - Vector2.new(sp.X, sp.Y)).Magnitude
                             if d <= fov and d < bestDist and (not visCheck or visible(part)) then
-                                best, bestDist = plr, d
+                                best, bestDist, bestPart = plr, d, part
                             end
                         end
                     end
@@ -208,7 +301,7 @@ local function findTarget(partName, fov, teamCheck, visCheck, fromPoint)
             end
         end
     end
-    return best
+    return best, bestPart
 end
 
 local function toolEquipped()
@@ -216,19 +309,43 @@ local function toolEquipped()
     return c and c:FindFirstChildOfClass("Tool")
 end
 
+local function overGui()
+    if not Window then return false end
+    local loc = cursorPoint()
+    local ok, objs = pcall(function()
+        return Window.ScreenGui:GetGuiObjectsAtPosition(loc.X, loc.Y)
+    end)
+    if not ok or type(objs) ~= "table" then return false end
+    for _, o in ipairs(objs) do
+        -- The popup overlay is a full-screen transparent frame, so it would
+        -- always report a hit if it were counted.
+        if o ~= Window.PopupOverlay then
+            if o == Window.MainFrame or o:IsA("GuiButton") or o:IsA("TextBox")
+                or o:IsA("ScrollingFrame") then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function glowColor(base, rainbow, offset)
+    if not rainbow then return base end
+    local h = (os.clock() * (state.rainbowSpeed / 100) + (offset or 0)) % 1
+    return Color3.fromHSV(h, 1, 1)
+end
+
 --=====================================================================
 -- ADONIS SHIELD
 --=====================================================================
--- Adonis verifies hooked metamethods by calling its own detector functions.
--- We find those tables in the GC and zombify the detectors so they always
--- report "clean". Game metamethods stay protected so the engine keeps working.
-local Shield = { zombied = {}, cands = {}, lastFull = 0, count = 0, armed = false, on = true }
-
-local DETECT = {
-    namecallInstance = true, indexInstance = true, newindexInstance = true,
-    namecallEnum = true, indexEnum = true, newindexEnum = true,
-    eqEnum = true, checkStack = true, isMethamethodValid = true,
-    getgcInstance = true, fireServerInstance = true, invokeServerInstance = true,
+local Shield = {
+    zombied = {}, cands = {}, lastFull = 0, count = 0, armed = false, on = true,
+    detect = {
+        namecallInstance = true, indexInstance = true, newindexInstance = true,
+        namecallEnum = true, indexEnum = true, newindexEnum = true,
+        eqEnum = true, checkStack = true, isMethamethodValid = true,
+        getgcInstance = true, fireServerInstance = true, invokeServerInstance = true,
+    },
 }
 
 local ProtectedFns = {}
@@ -259,7 +376,7 @@ local function fullSweep()
     if n > 0 then
         local names = {}
         for k in pairs(found[1]) do
-            if type(k) == "string" and DETECT[k] then table.insert(names, k) end
+            if type(k) == "string" and Shield.detect[k] then table.insert(names, k) end
         end
         print("[snow] shield candidate:", table.concat(names, ","))
     end
@@ -273,7 +390,7 @@ local function applyShield()
     local n = 0
     for _, c in ipairs(Shield.cands) do
         for k, v in pairs(c.t) do
-            if type(k) == "string" and DETECT[k] then
+            if type(k) == "string" and Shield.detect[k] then
                 if type(v) == "function" then
                     if zombify(v) then n = n + 1 end
                 elseif type(v) == "table" then
@@ -340,6 +457,19 @@ end
 -- UI LIBRARY
 --=====================================================================
 local Library = {}
+Library.Conns = {}
+
+local function guard(tag, fn)
+    return function(...)
+        if type(fn) ~= "function" then
+            warn("[snow] " .. tag .. ": nil callback")
+            return
+        end
+        local ok, err = pcall(fn, ...)
+        if not ok then warn("[snow] " .. tag .. ": " .. tostring(err)) end
+    end
+end
+
 Library.Theme = {
     WindowBg = Color3.fromRGB(10, 10, 12),
     WindowBorder = Color3.fromRGB(0, 0, 0),
@@ -393,7 +523,7 @@ local function getSafeParent()
     local success, coreGui = pcall(function() return game:GetService("CoreGui") end)
     if success and coreGui then return coreGui end
 
-    if LocalPlayer then return LocalPlayer:WaitForChild("PlayerGui") end
+    if LP then return LP:WaitForChild("PlayerGui") end
     error("[snow.cc] Failed to find UI container.")
 end
 
@@ -402,26 +532,26 @@ local function makeDraggable(dragHandle, container)
     local dragStart = Vector2.zero
     local startPos = UDim2.new()
 
-    dragHandle.InputBegan:Connect(function(input)
+    uiconn(dragHandle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
             startPos = container.Position
         end
-    end)
+    end))
 
-    UserInputService.InputChanged:Connect(function(input)
+    uiconn(UserInputService.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             local delta = input.Position - dragStart
             container.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         end
-    end)
+    end))
 
-    UserInputService.InputEnded:Connect(function(input)
+    uiconn(UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
-    end)
+    end))
 end
 
 function Library.CreateWindow(config)
@@ -430,6 +560,8 @@ function Library.CreateWindow(config)
     local link = config.Link or "discord.gg/snowcc"
     local windowSize = config.Size or Vector2.new(680, 720)
     local toggleKey = config.ToggleKey or Enum.KeyCode.RightShift
+
+    local isMenuVisible = true
 
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "silent_cc_" .. tostring(math.random(100000, 999999))
@@ -454,8 +586,6 @@ function Library.CreateWindow(config)
     windowStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     windowStroke.Parent = mainFrame
 
-    -- Vertical Sidebar Layout (havoc.dead style)
-    -- Outer Glow effect behind MainWindow
     local windowGlow = Instance.new("ImageLabel")
     windowGlow.Name = "WindowGlow"
     windowGlow.Size = UDim2.new(1, 36, 1, 36)
@@ -469,7 +599,6 @@ function Library.CreateWindow(config)
     windowGlow.ZIndex = mainFrame.ZIndex - 1
     windowGlow.Parent = mainFrame
 
-    -- Vertical Sidebar Layout (havoc.dead style)
     local sidebar = Instance.new("Frame")
     sidebar.Name = "Sidebar"
     sidebar.Size = UDim2.new(0, 160, 1, 0)
@@ -478,7 +607,6 @@ function Library.CreateWindow(config)
     sidebar.BorderSizePixel = 0
     sidebar.Parent = mainFrame
 
-    -- Subtle gradient highlight on sidebar
     local sbGrad = Instance.new("UIGradient")
     sbGrad.Color = ColorSequence.new({
         ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
@@ -546,7 +674,6 @@ function Library.CreateWindow(config)
     navLayout.Padding = UDim.new(0, 4)
     navLayout.Parent = navBar
 
-    -- User profile card at sidebar bottom with shading & glow
     local profileCard = Instance.new("Frame")
     profileCard.Name = "ProfileCard"
     profileCard.Size = UDim2.new(1, -16, 0, 46)
@@ -572,14 +699,14 @@ function Library.CreateWindow(config)
     userAvatar.BorderSizePixel = 0
     userAvatar.Image = "rbxasset://textures/ui/GuiImagePlaceholder.png"
     pcall(function()
-        if LocalPlayer then
+        if LP then
             local thumb, ready = pcall(function()
-                return Players:GetUserThumbnailAsync(LocalPlayer.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size48x48)
+                return Players:GetUserThumbnailAsync(LP.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size48x48)
             end)
             if thumb and ready then
                 userAvatar.Image = ready
             else
-                userAvatar.Image = string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=48&h=48", LocalPlayer.UserId)
+                userAvatar.Image = string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=48&h=48", LP.UserId)
             end
         end
     end)
@@ -604,7 +731,7 @@ function Library.CreateWindow(config)
     userLabel.TextColor3 = Library.Theme.LabelText
     userLabel.TextXAlignment = Enum.TextXAlignment.Left
     userLabel.TextTruncate = Enum.TextTruncate.AtEnd
-    userLabel.Text = LocalPlayer and ("@" .. LocalPlayer.Name) or "@user"
+    userLabel.Text = LP and ("@" .. LP.Name) or "@user"
     userLabel.Parent = profileCard
 
     local userRole = Instance.new("TextLabel")
@@ -619,9 +746,9 @@ function Library.CreateWindow(config)
     userRole.Text = "subscriber"
     userRole.Parent = profileCard
 
-    local function setVisibility(visible)
-        isMenuVisible = visible
-        if visible then
+    local function setVisibility(vis)
+        isMenuVisible = vis
+        if vis then
             mainFrame.Visible = true
             mainFrame.Size = UDim2.new(0, windowSize.X * 0.98, 0, windowSize.Y * 0.98)
             mainFrame.BackgroundTransparency = 0.3
@@ -643,11 +770,12 @@ function Library.CreateWindow(config)
         end
     end
 
-    UserInputService.InputBegan:Connect(function(input, gpe)
+    uiconn(UserInputService.InputBegan:Connect(function(input, gpe)
+        if state.unloaded then return end
         if not gpe and input.KeyCode == toggleKey then
             setVisibility(not isMenuVisible)
         end
-    end)
+    end))
 
     local contentArea = Instance.new("Frame")
     contentArea.Name = "ContentArea"
@@ -656,7 +784,6 @@ function Library.CreateWindow(config)
     contentArea.BackgroundTransparency = 1
     contentArea.Parent = mainFrame
 
-    -- Top-level Popup Overlay Frame (Bypasses scrolling frame clipping)
     local popupOverlay = Instance.new("Frame")
     popupOverlay.Name = "PopupOverlay"
     popupOverlay.Size = UDim2.new(1, 0, 1, 0)
@@ -665,7 +792,7 @@ function Library.CreateWindow(config)
     popupOverlay.ZIndex = 9000
     popupOverlay.Parent = screenGui
 
-    local Window = {
+    local WindowObj = {
         ScreenGui = screenGui,
         MainFrame = mainFrame,
         PopupOverlay = popupOverlay,
@@ -673,8 +800,8 @@ function Library.CreateWindow(config)
         CurrentTab = nil,
     }
 
-    function Window:CreateTab(tabName)
-        local tabIndex = #Window.Tabs + 1
+    function WindowObj:CreateTab(tabName)
+        local tabIndex = #WindowObj.Tabs + 1
 
         local tabBtn = Instance.new("TextButton")
         tabBtn.Name = string.format("Tab_%02d_%s", tabIndex, tabName)
@@ -697,7 +824,6 @@ function Library.CreateWindow(config)
         tabStroke.Transparency = 1
         tabStroke.Parent = tabBtn
 
-        -- Glowing indicator strip on the left edge
         local tabGlowBar = Instance.new("Frame")
         tabGlowBar.Name = "GlowBar"
         tabGlowBar.Size = UDim2.new(0, 3, 0, 16)
@@ -723,7 +849,6 @@ function Library.CreateWindow(config)
         tabLabel.Text = tabName
         tabLabel.Parent = tabBtn
 
-        -- Top-level container for this Tab (Houses fixed Top Nav Bar + Scrolling Content Area)
         local tabContainer = Instance.new("Frame")
         tabContainer.Name = "TabContainer_" .. tabName
         tabContainer.Size = UDim2.new(1, 0, 1, 0)
@@ -732,7 +857,6 @@ function Library.CreateWindow(config)
         tabContainer.Visible = false
         tabContainer.Parent = contentArea
 
-        -- Fixed Top Navigation Bar for Subtabs (Always visible at the top, never occluded by scrolling)
         local subtabBar = Instance.new("Frame")
         subtabBar.Name = "SubtabBar"
         subtabBar.Size = UDim2.new(1, 0, 0, 28)
@@ -868,22 +992,22 @@ function Library.CreateWindow(config)
         end
 
         tabBtn.MouseEnter:Connect(function()
-            if Window.CurrentTab ~= tabData then
+            if WindowObj.CurrentTab ~= tabData then
                 updateTabAppearance(false, true)
             end
         end)
 
         tabBtn.MouseLeave:Connect(function()
-            if Window.CurrentTab ~= tabData then
+            if WindowObj.CurrentTab ~= tabData then
                 updateTabAppearance(false, false)
             end
         end)
 
         local function selectTab()
-            if Window.CurrentTab == tabData then return end
-            local prevTab = Window.CurrentTab
+            if WindowObj.CurrentTab == tabData then return end
+            local prevTab = WindowObj.CurrentTab
 
-            for _, t in ipairs(Window.Tabs) do
+            for _, t in ipairs(WindowObj.Tabs) do
                 if t ~= tabData then
                     if t == prevTab then
                         local outTween = TweenService:Create(t.Canvas, TweenInfo.new(0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
@@ -892,7 +1016,7 @@ function Library.CreateWindow(config)
                         })
                         outTween:Play()
                         outTween.Completed:Connect(function()
-                            if Window.CurrentTab ~= t then
+                            if WindowObj.CurrentTab ~= t then
                                 t.Content.Visible = false
                             end
                         end)
@@ -927,13 +1051,13 @@ function Library.CreateWindow(config)
             }):Play()
 
             updateTabAppearance(true, false)
-            Window.CurrentTab = tabData
+            WindowObj.CurrentTab = tabData
         end
 
         tabBtn.MouseButton1Click:Connect(selectTab)
-        if #Window.Tabs == 0 then selectTab() end
+        if #WindowObj.Tabs == 0 then selectTab() end
 
-        table.insert(Window.Tabs, tabData)
+        table.insert(WindowObj.Tabs, tabData)
 
         local Tab = {}
         local groupboxCount = 0
@@ -946,7 +1070,6 @@ function Library.CreateWindow(config)
                 hasSubtabs = true
                 columns.Visible = false
                 subtabBar.Visible = true
-                -- Offset the scrolling pane below the fixed top navbar
                 tabContent.Position = UDim2.new(0, 0, 0, 36)
                 tabContent.Size = UDim2.new(1, 0, 1, -36)
             end
@@ -1096,7 +1219,6 @@ function Library.CreateWindow(config)
         function Tab:_InternalCreateGroupbox(groupTitleText, columnSide, targetLeftCol, targetRightCol)
             local parentCol = (columnSide == "Right") and (targetRightCol or rightCol) or (targetLeftCol or leftCol)
             groupboxCount = groupboxCount + 1
-            local parentCol = (columnSide == "Right") and (targetRightCol or rightCol) or (targetLeftCol or leftCol)
 
             local groupbox = Instance.new("Frame")
             groupbox.Name = string.format("Group_%02d_%s", groupboxCount, groupTitleText)
@@ -1176,12 +1298,35 @@ function Library.CreateWindow(config)
                 return tostring(key)
             end
 
+            -- The local is named `enabled` rather than `state` so it does not
+            -- shadow the global state table inside the keybind listener.
             function Group:AddToggle(label, default, options)
-                local state = default or false
+                local enabled = default or false
                 local keybind = options and options.Keybind or nil
                 local onKeyChanged = options and options.OnKeyChanged
                 local callback = options and options.Callback
                 local order = nextOrder()
+
+                local box, textBtn
+
+                local function paint()
+                    if box then
+                        box.BackgroundColor3 = enabled and Library.Theme.Accent or Library.Theme.InputBg
+                    end
+                    if textBtn then
+                        textBtn.TextColor3 = enabled and Color3.fromRGB(255, 255, 255) or Library.Theme.LabelText
+                    end
+                end
+
+                local function apply(v)
+                    enabled = v
+                    paint()
+                    if callback then pcall(callback, enabled) end
+                end
+
+                local toggle = guard("toggle " .. tostring(label), function()
+                    apply(not enabled)
+                end)
 
                 local row = Instance.new("Frame")
                 row.Name = string.format("%03d_Toggle_%s", order, label)
@@ -1190,11 +1335,11 @@ function Library.CreateWindow(config)
                 row.BackgroundTransparency = 1
                 row.Parent = itemsContainer
 
-                local box = Instance.new("TextButton")
+                box = Instance.new("TextButton")
                 box.Name = "CheckSquare"
                 box.Size = UDim2.new(0, 13, 0, 13)
                 box.Position = UDim2.new(0, 0, 0.5, -6)
-                box.BackgroundColor3 = state and Library.Theme.Accent or Library.Theme.InputBg
+                box.BackgroundColor3 = enabled and Library.Theme.Accent or Library.Theme.InputBg
                 box.BorderSizePixel = 0
                 box.Text = ""
                 box.AutoButtonColor = false
@@ -1205,14 +1350,14 @@ function Library.CreateWindow(config)
                 boxStroke.Thickness = 1
                 boxStroke.Parent = box
 
-                local textBtn = Instance.new("TextButton")
+                textBtn = Instance.new("TextButton")
                 textBtn.Name = "LabelBtn"
                 textBtn.Size = UDim2.new(1, -55, 1, 0)
                 textBtn.Position = UDim2.new(0, 22, 0, 0)
                 textBtn.BackgroundTransparency = 1
                 textBtn.Font = Enum.Font.RobotoMono
                 textBtn.TextSize = 11
-                textBtn.TextColor3 = state and Color3.fromRGB(255, 255, 255) or Library.Theme.LabelText
+                textBtn.TextColor3 = enabled and Color3.fromRGB(255, 255, 255) or Library.Theme.LabelText
                 textBtn.TextXAlignment = Enum.TextXAlignment.Left
                 textBtn.Text = label
                 textBtn.Parent = row
@@ -1220,7 +1365,7 @@ function Library.CreateWindow(config)
                 if keybind ~= nil or onKeyChanged ~= nil then
                     local currentKey = keybind
                     local listening = false
-                    local listenStartTime = 0
+                    local listenStart = 0
 
                     local keybindBtn = Instance.new("TextButton")
                     keybindBtn.Name = "Keybind"
@@ -1239,89 +1384,89 @@ function Library.CreateWindow(config)
                     kbStroke.Thickness = 1
                     kbStroke.Parent = keybindBtn
 
+                    local function stopListening()
+                        listening = false
+                        keybindBtn.Text = formatKeyName(currentKey)
+                        keybindBtn.TextColor3 = Library.Theme.MutedText
+                    end
+
                     keybindBtn.MouseButton1Click:Connect(function()
                         listening = true
-                        listenStartTime = tick()
+                        listenStart = tick()
                         keybindBtn.Text = "..."
                         keybindBtn.TextColor3 = Library.Theme.Accent
                     end)
 
-                    UserInputService.InputBegan:Connect(function(input, gpe)
+                    uiconn(UserInputService.InputBegan:Connect(function(input, gpe)
+                        if state.unloaded then return end
+
                         if listening then
-                            if tick() - listenStartTime < 0.12 then return end
-                            local chosen = nil
+                            -- Ignore the click that opened the field, and give up
+                            -- if the user wanders off so the field can never stay
+                            -- stuck and eat every later key press.
+                            if tick() - listenStart < 0.12 then return end
+                            if tick() - listenStart > 4 then stopListening() return end
+
                             if input.UserInputType == Enum.UserInputType.Keyboard then
                                 if input.KeyCode == Enum.KeyCode.Escape then
-                                    keybindBtn.Text = formatKeyName(currentKey)
-                                    keybindBtn.TextColor3 = Library.Theme.MutedText
-                                    listening = false
+                                    stopListening()
                                     return
-                                elseif input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
-                                    chosen = nil
+                                elseif input.KeyCode == Enum.KeyCode.Backspace
+                                    or input.KeyCode == Enum.KeyCode.Delete then
+                                    currentKey = nil
+                                    stopListening()
+                                    if onKeyChanged then pcall(onKeyChanged, nil) end
+                                    return
                                 else
-                                    chosen = input.KeyCode
+                                    currentKey = input.KeyCode
                                 end
                             elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
-                                chosen = Enum.UserInputType.MouseButton1
+                                currentKey = Enum.UserInputType.MouseButton1
                             elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-                                chosen = Enum.UserInputType.MouseButton2
+                                currentKey = Enum.UserInputType.MouseButton2
                             elseif input.UserInputType == Enum.UserInputType.MouseButton3 then
-                                chosen = Enum.UserInputType.MouseButton3
+                                currentKey = Enum.UserInputType.MouseButton3
+                            else
+                                return
                             end
 
-                            if chosen ~= nil or input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
-                                currentKey = chosen
-                                keybindBtn.Text = formatKeyName(currentKey)
-                                keybindBtn.TextColor3 = Library.Theme.MutedText
-                                listening = false
-                                if onKeyChanged then pcall(onKeyChanged, currentKey) end
-                            end
+                            stopListening()
+                            if onKeyChanged then pcall(onKeyChanged, currentKey) end
                             return
                         end
 
-                        -- Trigger toggle when keybind is pressed in-game
-                        if not gpe and currentKey ~= nil and UserInputService:GetFocusedTextBox() == nil then
-                            local matched = false
-                            if typeof(currentKey) == "EnumItem" then
-                                if currentKey.EnumType == Enum.KeyCode and input.KeyCode == currentKey then
-                                    matched = true
-                                elseif currentKey.EnumType == Enum.UserInputType and input.UserInputType == currentKey then
-                                    matched = true
-                                end
-                            end
-                            if matched then
-                                toggleState()
+                        if gpe or currentKey == nil then return end
+                        if UserInputService:GetFocusedTextBox() ~= nil then return end
+
+                        local matched = false
+                        if typeof(currentKey) == "EnumItem" then
+                            if currentKey.EnumType == Enum.KeyCode and input.KeyCode == currentKey then
+                                matched = true
+                            elseif currentKey.EnumType == Enum.UserInputType
+                                and input.UserInputType == currentKey then
+                                matched = true
                             end
                         end
-                    end)
+                        if matched then toggle() end
+                    end))
                 end
 
-                local function toggleState()
-                    state = not state
-                    box.BackgroundColor3 = state and Library.Theme.Accent or Library.Theme.InputBg
-                    textBtn.TextColor3 = state and Color3.fromRGB(255, 255, 255) or Library.Theme.LabelText
-                    if callback then pcall(callback, state) end
-                end
-
-                box.MouseButton1Click:Connect(toggleState)
-                textBtn.MouseButton1Click:Connect(toggleState)
+                box.MouseButton1Click:Connect(toggle)
+                textBtn.MouseButton1Click:Connect(toggle)
 
                 return {
-                    SetValue = function(newVal)
-                        state = newVal
-                        box.BackgroundColor3 = state and Library.Theme.Accent or Library.Theme.InputBg
-                        textBtn.TextColor3 = state and Color3.fromRGB(255, 255, 255) or Library.Theme.LabelText
-                        if callback then pcall(callback, state) end
-                    end,
-                    GetValue = function() return state end,
+                    SetValue = apply,
+                    GetValue = function() return enabled end,
                 }
             end
 
             function Group:AddKeybind(label, default, callback)
                 local currentKey = default or nil
                 local listening = false
-                local listenStartTime = 0
+                local listenStart = 0
                 local order = nextOrder()
+
+                local fire = guard("keybind " .. tostring(label), callback)
 
                 local row = Instance.new("Frame")
                 row.Name = string.format("%03d_Keybind_%s", order, label)
@@ -1358,66 +1503,74 @@ function Library.CreateWindow(config)
                 kbStroke.Thickness = 1
                 kbStroke.Parent = keyBtn
 
+                local function stopListening()
+                    listening = false
+                    keyBtn.Text = formatKeyName(currentKey)
+                    keyBtn.TextColor3 = Library.Theme.MutedText
+                end
+
                 keyBtn.MouseButton1Click:Connect(function()
                     listening = true
-                    listenStartTime = tick()
+                    listenStart = tick()
                     keyBtn.Text = "..."
                     keyBtn.TextColor3 = Library.Theme.Accent
                 end)
 
-                UserInputService.InputBegan:Connect(function(input, gpe)
+                uiconn(UserInputService.InputBegan:Connect(function(input, gpe)
+                    if state.unloaded then return end
+
                     if listening then
-                        if tick() - listenStartTime < 0.12 then return end
-                        local chosen = nil
+                        if tick() - listenStart < 0.12 then return end
+                        if tick() - listenStart > 4 then stopListening() return end
+
                         if input.UserInputType == Enum.UserInputType.Keyboard then
                             if input.KeyCode == Enum.KeyCode.Escape then
-                                keyBtn.Text = formatKeyName(currentKey)
-                                keyBtn.TextColor3 = Library.Theme.MutedText
-                                listening = false
+                                stopListening()
                                 return
-                            elseif input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
-                                chosen = nil
+                            elseif input.KeyCode == Enum.KeyCode.Backspace
+                                or input.KeyCode == Enum.KeyCode.Delete then
+                                currentKey = nil
+                                stopListening()
+                                fire(nil)
+                                return
                             else
-                                chosen = input.KeyCode
+                                currentKey = input.KeyCode
                             end
                         elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
-                            chosen = Enum.UserInputType.MouseButton1
+                            currentKey = Enum.UserInputType.MouseButton1
                         elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-                            chosen = Enum.UserInputType.MouseButton2
+                            currentKey = Enum.UserInputType.MouseButton2
                         elseif input.UserInputType == Enum.UserInputType.MouseButton3 then
-                            chosen = Enum.UserInputType.MouseButton3
+                            currentKey = Enum.UserInputType.MouseButton3
+                        else
+                            return
                         end
 
-                        if chosen ~= nil or input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
-                            currentKey = chosen
-                            keyBtn.Text = formatKeyName(currentKey)
-                            keyBtn.TextColor3 = Library.Theme.MutedText
-                            listening = false
-                            if callback then pcall(callback, currentKey) end
-                        end
+                        stopListening()
+                        fire(currentKey)
                         return
                     end
 
-                    if not gpe and currentKey ~= nil and UserInputService:GetFocusedTextBox() == nil then
-                        local matched = false
-                        if typeof(currentKey) == "EnumItem" then
-                            if currentKey.EnumType == Enum.KeyCode and input.KeyCode == currentKey then
-                                matched = true
-                            elseif currentKey.EnumType == Enum.UserInputType and input.UserInputType == currentKey then
-                                matched = true
-                            end
-                        end
-                        if matched and callback then
-                            pcall(callback, currentKey)
+                    if gpe or currentKey == nil then return end
+                    if UserInputService:GetFocusedTextBox() ~= nil then return end
+
+                    local matched = false
+                    if typeof(currentKey) == "EnumItem" then
+                        if currentKey.EnumType == Enum.KeyCode and input.KeyCode == currentKey then
+                            matched = true
+                        elseif currentKey.EnumType == Enum.UserInputType
+                            and input.UserInputType == currentKey then
+                            matched = true
                         end
                     end
-                end)
+                    if matched then fire(currentKey) end
+                end))
 
                 return {
                     SetKey = function(newKey)
                         currentKey = newKey
                         keyBtn.Text = formatKeyName(currentKey)
-                        if callback then pcall(callback, currentKey) end
+                        fire(currentKey)
                     end,
                     GetKey = function() return currentKey end,
                 }
@@ -1435,7 +1588,6 @@ function Library.CreateWindow(config)
                 sliderContainer.BackgroundTransparency = 1
                 sliderContainer.Parent = itemsContainer
 
-                -- Header row: Label on left, editable value box on right
                 local headerRow = Instance.new("Frame")
                 headerRow.Size = UDim2.new(1, 0, 0, 16)
                 headerRow.BackgroundTransparency = 1
@@ -1465,7 +1617,6 @@ function Library.CreateWindow(config)
                 valueBox.ClearTextOnFocus = false
                 valueBox.Parent = headerRow
 
-                -- Streamlined Thin Track (5px height, clean minimalist profile)
                 local track = Instance.new("TextButton")
                 track.Name = "Track"
                 track.Size = UDim2.new(1, 0, 0, 6)
@@ -1486,7 +1637,6 @@ function Library.CreateWindow(config)
                 trackStroke.Thickness = 1
                 trackStroke.Parent = track
 
-                -- Active Fill Bar (Clean gradient bar without circle knob)
                 local fill = Instance.new("Frame")
                 fill.Name = "Fill"
                 local alpha = (currentVal - min) / (max - min)
@@ -1507,7 +1657,6 @@ function Library.CreateWindow(config)
                 })
                 fGrad.Parent = fill
 
-                -- Right-edge vertical accent bar for subtle high-contrast terminus
                 local fillCap = Instance.new("Frame")
                 fillCap.Name = "Cap"
                 fillCap.Size = UDim2.new(0, 2, 1, 2)
@@ -1561,7 +1710,7 @@ function Library.CreateWindow(config)
                     end
                 end)
 
-                UserInputService.InputEnded:Connect(function(input)
+                uiconn(UserInputService.InputEnded:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                         if sliding then
                             sliding = false
@@ -1570,15 +1719,14 @@ function Library.CreateWindow(config)
                             TweenService:Create(valueBox, TweenInfo.new(0.15), { TextColor3 = Library.Theme.Accent }):Play()
                         end
                     end
-                end)
+                end))
 
-                UserInputService.InputChanged:Connect(function(input)
+                uiconn(UserInputService.InputChanged:Connect(function(input)
                     if sliding and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
                         updateSlide(input)
                     end
-                end)
+                end))
 
-                -- Allow direct numeric editing
                 valueBox.FocusLost:Connect(function()
                     local num = tonumber(valueBox.Text:match("%d+"))
                     if num then
@@ -1599,6 +1747,77 @@ function Library.CreateWindow(config)
                         local pct = (currentVal - min) / (max - min)
                         fill.Size = UDim2.new(pct, 0, 1, 0)
                         valueBox.Text = string.format("%d%s / %d%s", currentVal, u, max, u)
+                        if callback then pcall(callback, currentVal) end
+                    end,
+                    GetValue = function() return currentVal end,
+                }
+            end
+
+            function Group:AddTextbox(label, default, placeholder, callback)
+                local currentVal = default or ""
+                local order = nextOrder()
+
+                local row = Instance.new("Frame")
+                row.Name = string.format("%03d_Text_%s", order, label)
+                row.LayoutOrder = order
+                row.Size = UDim2.new(1, 0, 0, 40)
+                row.BackgroundTransparency = 1
+                row.Parent = itemsContainer
+
+                local labelText = Instance.new("TextLabel")
+                labelText.Name = "Label"
+                labelText.Size = UDim2.new(1, 0, 0, 14)
+                labelText.BackgroundTransparency = 1
+                labelText.Font = Library.Theme.FontBody
+                labelText.TextSize = 11
+                labelText.TextColor3 = Library.Theme.LabelText
+                labelText.TextXAlignment = Enum.TextXAlignment.Left
+                labelText.Text = label
+                labelText.Parent = row
+
+                local box = Instance.new("TextBox")
+                box.Name = "Box"
+                box.Size = UDim2.new(1, 0, 0, 22)
+                box.Position = UDim2.new(0, 0, 0, 16)
+                box.BackgroundColor3 = Library.Theme.InputBg
+                box.BorderSizePixel = 0
+                box.Font = Library.Theme.FontBody
+                box.TextSize = 10
+                box.TextColor3 = Library.Theme.LabelText
+                box.PlaceholderColor3 = Library.Theme.MutedText
+                box.PlaceholderText = placeholder or ""
+                box.Text = currentVal
+                box.ClearTextOnFocus = false
+                box.TextXAlignment = Enum.TextXAlignment.Left
+                box.Parent = row
+
+                local pad = Instance.new("UIPadding")
+                pad.PaddingLeft = UDim.new(0, 6)
+                pad.Parent = box
+
+                local corner = Instance.new("UICorner")
+                corner.CornerRadius = UDim.new(0, 4)
+                corner.Parent = box
+
+                local stroke = Instance.new("UIStroke")
+                stroke.Color = Library.Theme.InputBorder
+                stroke.Thickness = 1
+                stroke.Parent = box
+
+                box.Focused:Connect(function()
+                    stroke.Color = Library.Theme.Accent
+                end)
+
+                box.FocusLost:Connect(function()
+                    stroke.Color = Library.Theme.InputBorder
+                    currentVal = box.Text
+                    if callback then pcall(callback, currentVal) end
+                end)
+
+                return {
+                    SetValue = function(v)
+                        currentVal = tostring(v)
+                        box.Text = currentVal
                         if callback then pcall(callback, currentVal) end
                     end,
                     GetValue = function() return currentVal end,
@@ -1672,14 +1891,13 @@ function Library.CreateWindow(config)
                 arrow.Text = "▼"
                 arrow.Parent = dropBtn
 
-                -- Floating Overlay Options Menu (Parented to popupOverlay to avoid scroll clipping)
                 local popMenu = Instance.new("Frame")
                 popMenu.Name = "DropPopup_" .. label
                 popMenu.BackgroundColor3 = Color3.fromRGB(13, 13, 16)
                 popMenu.BorderSizePixel = 0
                 popMenu.Visible = false
                 popMenu.ZIndex = 10000
-                popMenu.Parent = Window.PopupOverlay
+                popMenu.Parent = WindowObj.PopupOverlay
 
                 local popCorner = Instance.new("UICorner")
                 popCorner.CornerRadius = UDim.new(0, 4)
@@ -1796,8 +2014,8 @@ function Library.CreateWindow(config)
                     end
                 end)
 
-                -- Auto close when clicking outside or resizing
-                UserInputService.InputBegan:Connect(function(input)
+                uiconn(UserInputService.InputBegan:Connect(function(input)
+                    if state.unloaded then return end
                     if isOpen and input.UserInputType == Enum.UserInputType.MouseButton1 then
                         local mPos = UserInputService:GetMouseLocation()
                         local pPos = popMenu.AbsolutePosition
@@ -1812,7 +2030,7 @@ function Library.CreateWindow(config)
                             closeDropdown()
                         end
                     end
-                end)
+                end))
 
                 return {
                     SetValue = function(newVal)
@@ -1826,6 +2044,106 @@ function Library.CreateWindow(config)
                         selected = newDefault or currentItems[1] or "None"
                         valLabel.Text = tostring(selected)
                         populateOptions()
+                    end,
+                    GetValue = function() return selected end,
+                }
+            end
+
+            function Group:AddSegmented(label, options, default, callback)
+                local selected = default or options[1]
+                local order = nextOrder()
+
+                local row = Instance.new("Frame")
+                row.Name = string.format("%03d_Seg_%s", order, label)
+                row.LayoutOrder = order
+                row.Size = UDim2.new(1, 0, 0, 42)
+                row.BackgroundTransparency = 1
+                row.Parent = itemsContainer
+
+                local title = Instance.new("TextLabel")
+                title.Size = UDim2.new(1, 0, 0, 14)
+                title.BackgroundTransparency = 1
+                title.Font = Library.Theme.FontBody
+                title.TextSize = 11
+                title.TextColor3 = Library.Theme.LabelText
+                title.TextXAlignment = Enum.TextXAlignment.Left
+                title.Text = label
+                title.Parent = row
+
+                local bar = Instance.new("Frame")
+                bar.Size = UDim2.new(1, 0, 0, 22)
+                bar.Position = UDim2.new(0, 0, 0, 16)
+                bar.BackgroundColor3 = Library.Theme.InputBg
+                bar.BorderSizePixel = 0
+                bar.Parent = row
+
+                local bCorner = Instance.new("UICorner")
+                bCorner.CornerRadius = UDim.new(0, 4)
+                bCorner.Parent = bar
+
+                local bStroke = Instance.new("UIStroke")
+                bStroke.Color = Library.Theme.InputBorder
+                bStroke.Thickness = 1
+                bStroke.Parent = bar
+
+                local layout = Instance.new("UIListLayout")
+                layout.FillDirection = Enum.FillDirection.Horizontal
+                layout.SortOrder = Enum.SortOrder.LayoutOrder
+                layout.Padding = UDim.new(0, 3)
+                layout.Parent = bar
+
+                local pad = Instance.new("UIPadding")
+                pad.PaddingLeft = UDim.new(0, 3)
+                pad.PaddingRight = UDim.new(0, 3)
+                pad.PaddingTop = UDim.new(0, 3)
+                pad.PaddingBottom = UDim.new(0, 3)
+                pad.Parent = bar
+
+                local buttons = {}
+                local function paint()
+                    for name, btn in pairs(buttons) do
+                        local on = (name == selected)
+                        btn.BackgroundColor3 = on and Color3.fromRGB(40, 40, 48) or Color3.fromRGB(14, 14, 18)
+                        btn.TextColor3 = on and Color3.fromRGB(255, 255, 255) or Library.Theme.MutedText
+                    end
+                end
+
+                for idx, name in ipairs(options) do
+                    local btn = Instance.new("TextButton")
+                    btn.Name = "Seg_" .. name
+                    btn.LayoutOrder = idx
+                    btn.Size = UDim2.new(1 / #options, -4, 1, 0)
+                    btn.BackgroundColor3 = Color3.fromRGB(14, 14, 18)
+                    btn.BorderSizePixel = 0
+                    btn.AutoButtonColor = false
+                    btn.Font = Library.Theme.FontBody
+                    btn.TextSize = 10
+                    btn.TextColor3 = Library.Theme.MutedText
+                    btn.Text = name
+                    btn.Parent = bar
+
+                    local c = Instance.new("UICorner")
+                    c.CornerRadius = UDim.new(0, 3)
+                    c.Parent = btn
+
+                    btn.MouseButton1Click:Connect(function()
+                        selected = name
+                        paint()
+                        if callback then pcall(callback, selected) end
+                    end)
+
+                    buttons[name] = btn
+                end
+
+                paint()
+
+                return {
+                    SetValue = function(v)
+                        if buttons[v] then
+                            selected = v
+                            paint()
+                            if callback then pcall(callback, selected) end
+                        end
                     end,
                     GetValue = function() return selected end,
                 }
@@ -1874,7 +2192,6 @@ function Library.CreateWindow(config)
                 previewStroke.Thickness = 1
                 previewStroke.Parent = colorPreview
 
-                -- Professional Pro-Grade Color Picker Dialog Frame
                 local pickerPopup = Instance.new("Frame")
                 pickerPopup.Name = "ColorPopup_" .. label
                 pickerPopup.Size = UDim2.new(0, 224, 0, 218)
@@ -1882,7 +2199,7 @@ function Library.CreateWindow(config)
                 pickerPopup.BorderSizePixel = 0
                 pickerPopup.Visible = false
                 pickerPopup.ZIndex = 9600
-                pickerPopup.Parent = Window.PopupOverlay
+                pickerPopup.Parent = WindowObj.PopupOverlay
 
                 local pkCorner = Instance.new("UICorner")
                 pkCorner.CornerRadius = UDim.new(0, 6)
@@ -1893,7 +2210,6 @@ function Library.CreateWindow(config)
                 pkStroke.Thickness = 1
                 pkStroke.Parent = pickerPopup
 
-                -- Outer drop shadow for color picker modal
                 local pkShadow = Instance.new("ImageLabel")
                 pkShadow.Name = "Shadow"
                 pkShadow.Size = UDim2.new(1, 24, 1, 24)
@@ -1907,7 +2223,6 @@ function Library.CreateWindow(config)
                 pkShadow.ZIndex = 9599
                 pkShadow.Parent = pickerPopup
 
-                -- Top title bar
                 local pkHeader = Instance.new("Frame")
                 pkHeader.Size = UDim2.new(1, -16, 0, 22)
                 pkHeader.Position = UDim2.new(0, 8, 0, 6)
@@ -1943,7 +2258,6 @@ function Library.CreateWindow(config)
                 csStroke.Thickness = 1
                 csStroke.Parent = curSwatch
 
-                -- 1. Saturation / Value Canvas Field
                 local svField = Instance.new("TextButton")
                 svField.Name = "SVField"
                 svField.Size = UDim2.new(0, 178, 0, 100)
@@ -1960,7 +2274,6 @@ function Library.CreateWindow(config)
                 svCorner.CornerRadius = UDim.new(0, 4)
                 svCorner.Parent = svField
 
-                -- White gradient layer (Horizontal Saturation: Left White -> Right Clear)
                 local whiteGradLayer = Instance.new("Frame")
                 whiteGradLayer.Size = UDim2.new(1, 0, 1, 0)
                 whiteGradLayer.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
@@ -1976,7 +2289,6 @@ function Library.CreateWindow(config)
                 wGrad.Rotation = 0
                 wGrad.Parent = whiteGradLayer
 
-                -- Black gradient layer (Vertical Value: Top Clear -> Bottom Black)
                 local blackGradLayer = Instance.new("Frame")
                 blackGradLayer.Size = UDim2.new(1, 0, 1, 0)
                 blackGradLayer.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
@@ -1992,7 +2304,6 @@ function Library.CreateWindow(config)
                 bGrad.Rotation = 90
                 bGrad.Parent = blackGradLayer
 
-                -- SV Target Reticle Marker
                 local svCursor = Instance.new("Frame")
                 svCursor.Name = "Cursor"
                 svCursor.Size = UDim2.new(0, 8, 0, 8)
@@ -2011,7 +2322,6 @@ function Library.CreateWindow(config)
                 curStroke.Thickness = 1.5
                 curStroke.Parent = svCursor
 
-                -- 2. Vertical Hue Rainbow Slider Bar
                 local hueBar = Instance.new("TextButton")
                 hueBar.Name = "HueBar"
                 hueBar.Size = UDim2.new(0, 18, 0, 100)
@@ -2059,7 +2369,6 @@ function Library.CreateWindow(config)
                 hcStroke.Thickness = 1
                 hcStroke.Parent = hueCursor
 
-                -- 3. Preset Quick Swatches
                 local swatchRow = Instance.new("Frame")
                 swatchRow.Size = UDim2.new(1, -16, 0, 18)
                 swatchRow.Position = UDim2.new(0, 8, 0, 140)
@@ -2084,7 +2393,6 @@ function Library.CreateWindow(config)
                     Color3.fromRGB(80, 80, 95),
                 }
 
-                -- 4. Direct RGB & Hex Inputs
                 local inputRow = Instance.new("Frame")
                 inputRow.Size = UDim2.new(1, -16, 0, 24)
                 inputRow.Position = UDim2.new(0, 8, 0, 166)
@@ -2181,7 +2489,6 @@ function Library.CreateWindow(config)
                     end)
                 end
 
-                -- Interactive SV Field Dragging
                 local draggingSV = false
                 local function updateSV(input)
                     local absPos = svField.AbsolutePosition
@@ -2202,7 +2509,6 @@ function Library.CreateWindow(config)
                     end
                 end)
 
-                -- Interactive Hue Bar Dragging
                 local draggingHue = false
                 local function updateHue(input)
                     local absPos = hueBar.AbsolutePosition
@@ -2221,7 +2527,7 @@ function Library.CreateWindow(config)
                     end
                 end)
 
-                UserInputService.InputChanged:Connect(function(input)
+                uiconn(UserInputService.InputChanged:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
                         if draggingSV then
                             updateSV(input)
@@ -2229,16 +2535,15 @@ function Library.CreateWindow(config)
                             updateHue(input)
                         end
                     end
-                end)
+                end))
 
-                UserInputService.InputEnded:Connect(function(input)
+                uiconn(UserInputService.InputEnded:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                         draggingSV = false
                         draggingHue = false
                     end
-                end)
+                end))
 
-                -- Manual RGB and Hex parsing
                 rgbBox.FocusLost:Connect(function()
                     local r, g, b = rgbBox.Text:match("(%d+)[%s,]+(%d+)[%s,]+(%d+)")
                     if r and g and b then
@@ -2266,7 +2571,7 @@ function Library.CreateWindow(config)
                     pickerPopup.Visible = false
                 end
 
-                colorPreview.MouseButton1Click:Connect(function()
+                local openPicker = guard("open color " .. tostring(label), function()
                     isOpen = not isOpen
                     if isOpen then
                         local absPos = colorPreview.AbsolutePosition
@@ -2274,7 +2579,7 @@ function Library.CreateWindow(config)
                         local popH = 218
                         local posX = absPos.X - popW - 8
                         if posX < 10 then posX = absPos.X + 50 end
-                        local posY = math.clamp(absPos.Y - 20, 10, Camera.ViewportSize.Y - popH - 10)
+                        local posY = math.clamp(absPos.Y - 20, 10, cam().ViewportSize.Y - popH - 10)
 
                         pickerPopup.Position = UDim2.new(0, posX, 0, posY)
                         pickerPopup.Visible = true
@@ -2284,7 +2589,10 @@ function Library.CreateWindow(config)
                     end
                 end)
 
-                UserInputService.InputBegan:Connect(function(input)
+                colorPreview.MouseButton1Click:Connect(openPicker)
+
+                uiconn(UserInputService.InputBegan:Connect(function(input)
+                    if state.unloaded then return end
                     if isOpen and not draggingSV and not draggingHue and input.UserInputType == Enum.UserInputType.MouseButton1 then
                         local mPos = UserInputService:GetMouseLocation()
                         local pPos = pickerPopup.AbsolutePosition
@@ -2299,7 +2607,7 @@ function Library.CreateWindow(config)
                             closePicker()
                         end
                     end
-                end)
+                end))
 
                 return {
                     SetColor = function(newColor)
@@ -2357,9 +2665,7 @@ function Library.CreateWindow(config)
                     stroke.Color = Library.Theme.InputBorder
                 end)
 
-                btn.MouseButton1Click:Connect(function()
-                    if callback then pcall(callback) end
-                end)
+                btn.MouseButton1Click:Connect(guard("button " .. tostring(label), callback))
 
                 return btn
             end
@@ -2370,53 +2676,58 @@ function Library.CreateWindow(config)
         return Tab
     end
 
-    return Window
+    return WindowObj
 end
 
 
 --=====================================================================
--- FOV CIRCLES
+-- DRAWINGS
 --=====================================================================
-local aimCircle = Drawing.new("Circle")
-aimCircle.Thickness = 1
-aimCircle.NumSides = 48
-aimCircle.Transparency = 1
-aimCircle.Visible = false
+local hasDrawing = Drawing ~= nil
+local draw = {}
 
-local silentCircle = Drawing.new("Circle")
-silentCircle.Thickness = 1
-silentCircle.NumSides = 48
-silentCircle.Transparency = 1
-silentCircle.Visible = false
+if hasDrawing then
+    draw.aimCircle = Drawing.new("Circle")
+    draw.aimCircle.Thickness = 1
+    draw.aimCircle.NumSides = 48
+    draw.aimCircle.Transparency = 1
+    draw.aimCircle.Visible = false
 
-local aimSnapline = Drawing.new("Line")
-aimSnapline.Thickness = 1
-aimSnapline.Visible = false
+    draw.silentCircle = Drawing.new("Circle")
+    draw.silentCircle.Thickness = 1
+    draw.silentCircle.NumSides = 48
+    draw.silentCircle.Transparency = 1
+    draw.silentCircle.Visible = false
 
-local silentSnapline = Drawing.new("Line")
-silentSnapline.Thickness = 1
-silentSnapline.Visible = false
+    draw.aimSnapline = Drawing.new("Line")
+    draw.aimSnapline.Thickness = 1
+    draw.aimSnapline.Visible = false
+
+    draw.silentSnapline = Drawing.new("Line")
+    draw.silentSnapline.Thickness = 1
+    draw.silentSnapline.Visible = false
+
+    draw.aaLine = Drawing.new("Line")
+    draw.aaLine.Thickness = 2
+    draw.aaLine.Visible = false
+
+    draw.aaText = Drawing.new("Text")
+    draw.aaText.Size = 12
+    draw.aaText.Center = true
+    draw.aaText.Outline = true
+    draw.aaText.Visible = false
+end
 
 --=====================================================================
 -- GUN LOCKS
 --=====================================================================
 local LOCK_KEYS = { "Ammo", "MaxAmmo", "ShootingCooldown", "Damage", "Range" }
-local gunLocks = {}
+local locks = { byTool = {}, last = nil }
 
-local origMax = setmetatable({}, { __mode = "k" })
-
--- Ammo is only ever refilled up to the gun's REAL MaxAmmo; values above it desync from the server and make it drop shots
-local function desiredValues(tool)
-    local ammo
-    if state.infiniteAmmo and tool then
-        if not origMax[tool] then
-            local m = tool:FindFirstChild("MaxAmmo")
-            origMax[tool] = m and m.Value or nil
-        end
-        ammo = origMax[tool]
-    end
+local function desiredValues()
     return {
-        Ammo = ammo,
+        Ammo = state.infiniteAmmo and state.maxAmmo or nil,
+        MaxAmmo = state.infiniteAmmo and state.maxAmmo or nil,
         ShootingCooldown = state.rapidFire and state.fireCooldown or nil,
         Damage = state.damageOverride and state.damageValue or nil,
         Range = state.rangeOverride and state.rangeValue or nil,
@@ -2425,7 +2736,7 @@ end
 
 local function pushLocks(tool)
     if not tool or state.unloaded then return end
-    local want = desiredValues(tool)
+    local want = desiredValues()
     for name, val in pairs(want) do
         if val then
             local v = tool:FindFirstChild(name)
@@ -2437,13 +2748,13 @@ local function pushLocks(tool)
 end
 
 local function attachLocks(tool)
-    if not tool or gunLocks[tool] then return end
+    if not tool or locks.byTool[tool] then return end
     local list = {}
     for _, name in ipairs(LOCK_KEYS) do
         local v = tool:FindFirstChild(name)
         if v and v:IsA("ValueBase") then
             local c = v:GetPropertyChangedSignal("Value"):Connect(function()
-                local want = desiredValues(tool)[name]
+                local want = desiredValues()[name]
                 if want and v.Value ~= want then
                     pcall(function() v.Value = want end)
                 end
@@ -2451,16 +2762,160 @@ local function attachLocks(tool)
             table.insert(list, c)
         end
     end
-    gunLocks[tool] = list
+    locks.byTool[tool] = list
     pushLocks(tool)
 end
 
 local function detachLocks(tool)
-    local list = gunLocks[tool]
+    local list = locks.byTool[tool]
     if list then
         for _, c in ipairs(list) do pcall(function() c:Disconnect() end) end
-        gunLocks[tool] = nil
+        locks.byTool[tool] = nil
     end
+end
+
+local function releaseStaleLocks(tool)
+    if tool == locks.last then return end
+    if locks.last then detachLocks(locks.last) end
+    locks.last = tool
+end
+
+--=====================================================================
+-- HIT SOUNDS
+--=====================================================================
+local HIT_SOUNDS = {
+    ["Sword Slash"] = "rbxassetid://12222216",
+    ["Sword Lunge"] = "rbxassetid://12222225",
+    ["Blade"] = "rbxassetid://12221967",
+    ["Click"] = "rbxassetid://877051984",
+    ["Bass"] = "rbxassetid://138186576",
+    ["Pop"] = "rbxassetid://131961136",
+}
+
+local function playHitSound(id)
+    local asset = id or state.hitSoundId
+    if not asset or asset == "" then return end
+    local s = Instance.new("Sound")
+    s.SoundId = asset
+    s.Volume = state.hitSoundVolume
+    s.PlaybackSpeed = state.hitSoundPitch
+    s.Parent = SoundService
+    s:Play()
+    task.delay(2.5, function() pcall(function() s:Destroy() end) end)
+end
+
+-- Health is watched rather than the shot itself, so a shot that the server
+-- rejects (spread miss, wall, dead target) does not click.
+local hitWatch = {}
+
+local function watchHit(part)
+    if not state.hitSound or not part then return end
+    local model = part:FindFirstAncestorOfClass("Model")
+    local hum = model and model:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return end
+    table.insert(hitWatch, { hum = hum, hp = hum.Health, at = os.clock() })
+end
+
+local function pollHits()
+    for i = #hitWatch, 1, -1 do
+        local w = hitWatch[i]
+        if os.clock() - w.at > 0.7 or not w.hum.Parent then
+            table.remove(hitWatch, i)
+        elseif w.hum.Health < w.hp - 0.5 then
+            playHitSound()
+            table.remove(hitWatch, i)
+        end
+    end
+end
+
+--=====================================================================
+-- BULLET TRACERS
+--=====================================================================
+local tracer = { pool = {}, live = {} }
+
+local function tracerOrigin()
+    local t = toolEquipped()
+    if t then
+        local p = t:FindFirstChild("Muzzle") or t:FindFirstChild("Handle")
+        if p then return p.Position end
+    end
+    return cam().CFrame.Position
+end
+
+local function takeTracer()
+    for _, t in ipairs(tracer.pool) do
+        if not t.busy then
+            t.busy = true
+            return t
+        end
+    end
+    local t = {}
+    t.under = Drawing.new("Line")
+    t.under.Visible = false
+    t.line = Drawing.new("Line")
+    t.line.Visible = false
+    t.busy = true
+    table.insert(tracer.pool, t)
+    return t
+end
+
+local function spawnTracer(from, to)
+    if not state.tracer or not hasDrawing or state.unloaded then return end
+    local sp, onA = cam():WorldToViewportPoint(from)
+    local ep, onB = cam():WorldToViewportPoint(to)
+    if not onA or not onB or sp.Z <= 0 or ep.Z <= 0 then return end
+
+    local t = takeTracer()
+    t.from = Vector2.new(sp.X, sp.Y)
+    t.to = Vector2.new(ep.X, ep.Y)
+    t.born = os.clock()
+    table.insert(tracer.live, t)
+end
+
+local function renderTracers()
+    for i = #tracer.live, 1, -1 do
+        local t = tracer.live[i]
+        local age = os.clock() - t.born
+        if age >= state.tracerLife then
+            t.line.Visible = false
+            t.under.Visible = false
+            t.busy = false
+            table.remove(tracer.live, i)
+        else
+            local fade = 1 - (age / state.tracerLife)
+            local w = state.tracerWidth
+            t.line.From = t.from
+            t.line.To = t.to
+            t.line.Color = state.tracerColor
+            t.line.Transparency = fade
+            t.line.Visible = true
+
+            if state.tracerStyle == "Glow" then
+                t.under.From = t.from
+                t.under.To = t.to
+                t.under.Color = state.tracerColor
+                t.under.Thickness = w * 3
+                t.under.Transparency = fade * 0.65
+                t.under.Visible = true
+                t.line.Thickness = w
+            elseif state.tracerStyle == "Thick" then
+                t.under.Visible = false
+                t.line.Thickness = w * 2
+            else
+                t.under.Visible = false
+                t.line.Thickness = w
+            end
+        end
+    end
+end
+
+local function clearTracers()
+    for _, t in ipairs(tracer.pool) do
+        pcall(function() t.under:Remove() end)
+        pcall(function() t.line:Remove() end)
+    end
+    tracer.pool = {}
+    tracer.live = {}
 end
 
 --=====================================================================
@@ -2478,9 +2933,7 @@ local function loadGunHandler()
     return nil
 end
 
-local originals = {}
-local shotCount = 0
-local lastReport = 0
+local shots = { originals = {}, count = 0, report = 0 }
 
 local function patchDeep(t, part, dir, pos, depth)
     if (depth or 0) > 3 then return end
@@ -2509,48 +2962,27 @@ local function fillParams(params, part, pos)
     pos = pos or predict(part, 1)
     local origin = params.Origin or params.ForcedOrigin
     local tool = toolEquipped()
-    if typeof(origin) ~= "Vector3" then
-        if tool then
-            local p = tool:FindFirstChild("Muzzle") or tool:FindFirstChild("Handle") or tool:FindFirstChildWhichIsA("BasePart")
-            if p then origin = p.Position end
-        end
+    if typeof(origin) ~= "Vector3" and tool then
+        local p = tool:FindFirstChild("Muzzle") or tool:FindFirstChild("Handle")
+            or tool:FindFirstChildWhichIsA("BasePart")
+        if p then origin = p.Position end
     end
     if typeof(origin) ~= "Vector3" then origin = cam().CFrame.Position end
 
     local dir = pos - origin
-    local dist = dir.Magnitude
-    if dist < 0.01 then
-        dir = Vector3.new(0, 0, -1)
-        dist = 1
-    else
-        dir = dir.Unit
-    end
+    if dir.Magnitude < 0.01 then dir = Vector3.new(0, 0, -1) else dir = dir.Unit end
 
-    params.AimPosition = pos
-    params.Normal = -dir
-    params.HitPosition = pos
-    params.HitNormal = -dir
-    params.HitInstance = part
-    params.Hit = part
-    params.Target = part
+    params.AimPosition  = pos
+    params.Hit          = part
+    params.HitInstance  = part
+    params.HitPosition  = pos
+    params.HitNormal    = -dir
+    params.Normal       = -dir
+    params.Target       = part
+    params.Precomputed  = nil
 
-    -- Keep original weapon origin clean so Zee Hood server distance check passes
-    if state.wallbangMode == "Hard" then
-        local back = origin - pos
-        if back.Magnitude > 0.01 then
-            params.ForcedOrigin = pos + back.Unit * 1.5
-        end
-    elseif params.Origin ~= nil then
+    if typeof(params.Origin) == "Vector3" then
         params.ForcedOrigin = params.Origin
-    end
-
-    local pre = params.Precomputed
-    if typeof(pre) == "CFrame" then
-        params.Precomputed = CFrame.lookAt(origin, pos)
-    elseif typeof(pre) == "Vector3" then
-        params.Precomputed = pos
-    elseif type(pre) == "table" then
-        patchDeep(pre, part, dir, pos, 0)
     end
     return pos, dir
 end
@@ -2565,11 +2997,19 @@ local function report(params, res)
         table.insert(rets, typeof(res[i]) .. "(" .. tostring(res[i]) .. ")")
     end
     print(string.format("[snow] shot #%d keys=[%s] returns=%d [%s]",
-        shotCount, table.concat(keys, ","), res.n, table.concat(rets, ",")))
+        shots.count, table.concat(keys, ","), res.n, table.concat(rets, ",")))
+end
+
+-- A receiver is either the module itself or a proxy that carries its methods.
+-- A plain params table has neither, so it is treated as the first real argument.
+local function isSelf(x)
+    if type(x) ~= "table" then return false end
+    if x == GunHandler then return true end
+    return type(rawget(x, "Shoot")) == "function" or type(x.Shoot) == "function"
 end
 
 local function split(a, b)
-    if a == GunHandler then return GunHandler, b end
+    if isSelf(a) then return a, b end
     return nil, a
 end
 
@@ -2585,89 +3025,299 @@ local function callOrig(orig, self, first, ...)
     return orig(first, ...)
 end
 
-local function forcedTrace(part, origin)
-    origin = typeof(origin) == "Vector3" and origin or cam().CFrame.Position
-    local dir = part.Position - origin
-    local rp = RaycastParams.new()
-    rp.FilterType = Enum.RaycastFilterType.Include
-    rp.FilterDescendantsInstances = { part.Parent }
-    local hit = workspace:Raycast(origin, dir, rp)
-    if hit then return hit.Position, hit.Instance, hit.Normal end
-    return part.Position, part, -dir.Unit
+local function isLocalShooter(params)
+    local s = params.Shooter
+    if s == nil then return true end
+    local my = getChar()
+    return s == my or s == LP
 end
 
-local silPart, silPos, silAt = nil, nil, 0
+-- The server raycasts from the origin we send and ignores the part we claim, so
+-- the origin has to clear the cover itself. It always advances a minimum amount
+-- first: the muzzle is usually inside the wall, and a ray starting inside a part
+-- doesn't hit that part, so trusting a "clear" reading at the muzzle leaves the
+-- origin embedded in the cover.
+local function bangOrigin(origin, part, pos, maxMove)
+    local d = pos - origin
+    local dist = d.Magnitude
+    if dist < 6 then return origin end
+    local unit = d.Unit
+    local ex = losParams(part)
+    local inc = incParams(part)
+
+    local cap = maxMove or 28
+    if state.wallbangMode == "Soft" then
+        cap = math.min(cap, 8)
+    elseif state.wallbangMode == "Snap" then
+        cap = math.max(cap, 300)
+    end
+
+    local limit = math.min(dist - 3, cap, 400)
+    if limit <= 1 then return origin end
+
+    local travel = math.min(5, limit)
+    for _ = 1, 6 do
+        local from = origin + unit * travel
+        local remain = pos - from
+        local h = workspace:Raycast(from, remain, ex)
+        if not h then
+            if workspace:Raycast(from, remain, inc) then return from end
+            return from
+        end
+        travel = math.min(travel + h.Distance + 2, limit)
+        if travel >= limit then break end
+    end
+    return origin + unit * travel
+end
+
+local function bangHit(part, pos, origin)
+    local o = origin
+    if state.wallbangMode ~= "Off" then
+        o = bangOrigin(origin, part, pos, state.wallbangMax)
+    end
+    local h = workspace:Raycast(o, pos - o, incParams(part))
+    if h and (h.Position - o).Magnitude > 1.5 then
+        return o, h.Position, h.Instance, h.Normal
+    end
+    return o, pos, part, -(pos - o).Unit
+end
+
+-- The Handle is welded to the right hand. Writing its CFrame while that weld is
+-- live drags the whole character toward the spoofed point, so the joint is cut
+-- while a shift is active and restored when it ends. In R15 the grip is a Weld
+-- on the RightHand named RightGrip, not a child of the Handle, so it has to be
+-- found by scanning the character rather than by name on the Handle.
+local grip = { weld = nil, side = nil, part = nil, offset = nil, hold = 0, log = 0 }
+
+local function findGrip(handle)
+    local pools = { getChar(), toolEquipped() }
+    for _, pool in ipairs(pools) do
+        if pool then
+            for _, d in ipairs(pool:GetDescendants()) do
+                if d:IsA("Weld") or d:IsA("Motor6D") then
+                    if d.Part1 == handle then return d, "Part1" end
+                    if d.Part0 == handle then return d, "Part0" end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function breakGrip(handle, hand)
+    if grip.weld and grip.weld.Parent then return true end
+    local w, side = findGrip(handle)
+    if not w then return false end
+    grip.weld, grip.side, grip.part = w, side, w[side]
+    if hand then grip.offset = hand.CFrame:Inverse() * handle.CFrame end
+    pcall(function() w[side] = nil end)
+    return true
+end
+
+-- The offset is re-applied before the joint is remade, so a refused re-attach
+-- can never leave the gun hanging in mid air away from the hand.
+local function restoreGrip(handle, hand)
+    if grip.weld and grip.side and grip.part then
+        if handle and hand and grip.offset then
+            pcall(function() handle.CFrame = hand.CFrame * grip.offset end)
+        end
+        pcall(function()
+            if grip.weld.Parent then grip.weld[grip.side] = grip.part end
+        end)
+    end
+    grip.weld, grip.side, grip.part, grip.offset = nil, nil, nil, nil
+end
+
+local sil = { part = nil, pos = nil, at = 0 }
 
 local function liveSilentPart()
     if not state.silent then return nil end
-    if silPart and silPos and os.clock() - silAt < 0.04 then
-        if silPart.Parent and silPart.Parent.Parent then
-            return silPart, silPos
+    if sil.part and sil.pos and os.clock() - sil.at < 0.25 then
+        if sil.part.Parent and sil.part.Parent.Parent then
+            return sil.part, sil.pos
         end
-        silPart, silPos = nil, nil
+        sil.part, sil.pos = nil, nil
     end
     local originPoint = cursorPoint()
     if state.silentCircleY and state.silentCircleY ~= 0 then
         originPoint = Vector2.new(originPoint.X, originPoint.Y + state.silentCircleY)
     end
-    local target = findTarget(state.silentPart, state.silentFov, state.silentTeamCheck, ignoreVis(), originPoint)
-    if not target then silPart, silPos = nil, nil; return nil end
-    if math.random(1, 100) > state.silentChance then silPart, silPos = nil, nil; return nil end
-    local part = getPart(target, state.silentPart)
-    if not part then silPart, silPos = nil, nil; return nil end
+    local target, part = findTarget(state.silentPart, state.silentFov, state.silentTeamCheck, state.silentVisibleOnly, originPoint)
+    if not target or not part then sil.part, sil.pos = nil, nil; return nil end
+    if math.random(1, 100) > state.silentChance then sil.part, sil.pos = nil, nil; return nil end
     local pos = predict(part, 1, "silent")
-    silPart, silPos, silAt = part, pos, os.clock()
+    sil.part, sil.pos, sil.at = part, pos, os.clock()
     return part, pos
+end
+
+-- Per-frame payload, resolved once in RenderStepped so the namecall hook itself
+-- never has to touch the engine. The payload lives in one table because the
+-- chunk is already at Luau's 200 local register ceiling.
+local frameSilentPart, frameSilentPos
+local frame = { valid = false, bangOrigin = nil, hitPos = nil, hitPart = nil,
+                hitNorm = nil, bodyDist = 0 }
+
+local function currentSilent()
+    if not frameSilentPart or not frameSilentPos then return nil end
+    if not frameSilentPart.Parent then return nil end
+    local model = frameSilentPart:FindFirstAncestorOfClass("Model")
+    local hum = model and model:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Health <= 0 then return nil end
+    return frameSilentPart, frameSilentPos
+end
+
+--=====================================================================
+-- REMOTE FALLBACK SHOT
+--=====================================================================
+-- The Handle shift only works if the game builds its origin from the Handle, and
+-- on this build it does not reliably. So in Remote mode nothing is moved at all:
+-- the corrected origin is sent on our own ShootGun call instead, which is the
+-- exact path the probe already proved lands damage. Only fired when the muzzle
+-- is genuinely blocked, so open shots don't take double damage.
+local rem = { event = nil, live = false, at = 0 }
+
+local function getRemoteEvent()
+    if rem.event and rem.event.Parent then return rem.event end
+    local mr = ReplicatedStorage:FindFirstChild("MainRemotes")
+    rem.event = mr and mr:FindFirstChild("MainRemoteEvent")
+    return rem.event
+end
+
+local function numOn(name, dflt)
+    local t = toolEquipped()
+    local v = t and t:FindFirstChild(name)
+    if v and v:IsA("ValueBase") then
+        local n = tonumber(v.Value)
+        if n then return n end
+    end
+    return dflt
+end
+
+local function fireRemoteShot()
+    if state.unloaded or rem.live then return end
+    if not state.silent or state.wallbangMode ~= "Remote" then return end
+    local remote = getRemoteEvent()
+    if not remote then return end
+    if os.clock() - rem.at < 0.05 then return end
+
+    local tool = toolEquipped()
+    local handle = tool and tool:FindFirstChild("Handle")
+    if not handle then return end
+
+    local part, pos = currentSilent()
+    if not part or not pos then return end
+
+    local char = getChar()
+    local hand = char and (char:FindFirstChild("RightHand") or char:FindFirstChild("Right Arm"))
+    local base = (hand and hand.Position) or handle.Position
+
+    -- The game's own remote still fires from the real muzzle, so an unobstructed
+    -- shot already lands and a second one would double the damage.
+    if not workspace:Raycast(base, pos - base, losParams(part)) then return end
+
+    local o, hp, hi = bangHit(part, pos, base)
+    if (o - base).Magnitude < 0.5 then return end
+
+    -- rawAim is a Vector3 far point, not a CFrame, and arg 4 stays nil for
+    -- single-projectile guns. A CFrame or a number here makes the server drop it.
+    local unit = (hp - o).Unit
+    local dmg = state.damageOverride and state.damageValue or numOn("Damage", 25)
+    local rng = state.rangeOverride and state.rangeValue or math.max(numOn("Range", 300), (hp - o).Magnitude + 25)
+    local far = o + unit * rng
+
+    rem.at = os.clock()
+
+    local ok, err = pcall(function()
+        remote:FireServer("ShootGun", handle, o, nil, hp, hi, -(hp - o).Unit, rng, dmg, far, hi)
+    end)
+
+    watchHit(hi)
+    spawnTracer(tracerOrigin(), hp)
+
+    if state.debugShots then
+        print(string.format("[snow] remote %s | moved %.1f | part %s | dmg %.0f | range %.0f",
+            ok and "sent" or ("FAILED " .. tostring(err)),
+            (o - base).Magnitude, hi.Name, dmg, rng))
+    end
+end
+
+track(UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe or state.unloaded then return end
+    if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+    if not mouseFree() then return end
+    if overGui() then return end
+    pcall(fireRemoteShot)
+end))
+
+local function safeCall(orig, self, first, ...)
+    local packed = table.pack(pcall(callOrig, orig, self, first, ...))
+    if not packed[1] then return table.pack() end
+    local out = table.pack()
+    for i = 2, packed.n do out[i - 1] = packed[i] end
+    out.n = math.max(packed.n - 1, 0)
+    return out
+end
+
+local function isCharPart(p)
+    if not p then return false end
+    local m = p:FindFirstAncestorOfClass("Model")
+    return (m ~= nil and m:FindFirstChildOfClass("Humanoid") ~= nil)
 end
 
 local function install(name, wrapper)
     local fn = GunHandler[name]
     if type(fn) ~= "function" then return false end
     if SAFE then
-        originals[name] = fn
+        shots.originals[name] = fn
         GunHandler[name] = function(...) return wrapper(fn, ...) end
         return true
     end
     local orig = nil
     local hookOk = pcall(function()
-        local res = hookfunction(fn, function(...)
-            local targetFn = orig or originals[name] or fn
+        local res = hookfunction(fn, newcclosure(function(...)
+            local targetFn = orig or shots.originals[name] or fn
             return wrapper(targetFn, ...)
-        end)
+        end))
         if type(res) == "function" then
             orig = res
         end
     end)
     if not hookOk or type(orig) ~= "function" then
-        originals[name] = fn
+        shots.originals[name] = fn
         GunHandler[name] = function(...) return wrapper(fn, ...) end
         return true
     end
-    originals[name] = orig
+    shots.originals[name] = orig
     return true
 end
 
 local shootWrapper = function(orig, a, b, ...)
     local self, params = split(a, b)
-    local part, pos = nil, nil
-    local cachedPos, cachedDir
-
-    if not state.unloaded and state.silent then part, pos = liveSilentPart() end
-    if part and type(params) == "table" then
-        local ok, p, d = pcall(fillParams, params, part, pos)
-        if ok then cachedPos, cachedDir = p, d end
+    if type(params) == "table" and not isLocalShooter(params) then
+        return callOrig(orig, self, params, ...)
     end
+
+    local part, pos, cachedPos, cachedDir
+
+    if not state.unloaded and state.silent then part, pos = currentSilent() end
+    if part and type(params) == "table"
+        and (state.spreadCondenser or not isCharPart(params.HitInstance)) then
+        local ok, p, d = pcall(fillParams, params, part, pos)
+        if ok then cachedPos, cachedDir = p, d else part = nil end
+    else
+        part = nil
+    end
+
     if not state.unloaded and state.infiniteAmmo then pushLocks(toolEquipped()) end
 
-    local res = table.pack(callOrig(orig, self, params, ...))
+    local res = safeCall(orig, self, params, ...)
 
-    if part and cachedPos and cachedDir then
+    if part and cachedPos then
         for i = 1, res.n do
             local v = res[i]
-            local tv = typeof(v)
-            if tv == "Vector3" then
+            if typeof(v) == "Vector3" then
                 res[i] = cachedPos
-            elseif tv == "Instance" then
+            elseif typeof(v) == "Instance" then
                 res[i] = part
             elseif type(v) == "table" then
                 pcall(patchDeep, v, part, cachedDir, cachedPos, 0)
@@ -2676,11 +3326,13 @@ local shootWrapper = function(orig, a, b, ...)
         if res.n >= 2 and typeof(res[2]) ~= "Instance" then
             res[2] = part
         end
+        watchHit(part)
+        spawnTracer(tracerOrigin(), cachedPos)
     end
 
-    shotCount = shotCount + 1
-    if shotCount <= 10 or os.clock() - lastReport > 3 then
-        lastReport = os.clock()
+    shots.count = shots.count + 1
+    if state.debugShots and (shots.count <= 10 or os.clock() - shots.report > 3) then
+        shots.report = os.clock()
         pcall(report, params, res)
     end
 
@@ -2689,55 +3341,213 @@ local shootWrapper = function(orig, a, b, ...)
 end
 
 local getAimWrapper = function(orig, a, b, ...)
-    local self, first = split(a, b)
-    local res = callOrig(orig, self, first, ...)
+    local self, origin = split(a, b)
+    local res, mag = callOrig(orig, self, origin, ...)
 
-    if not state.unloaded and state.silent then
-        local part, pos = liveSilentPart()
+    if not state.unloaded and state.silent and typeof(origin) == "Vector3" then
+        local part, pos = currentSilent()
         if part then
-            local rt = typeof(res)
-            if rt == "CFrame" then return CFrame.lookAt(cam().CFrame.Position, pos) end
-            if rt == "Vector3" then
-                    -- GetAim returns a unit DIRECTION from the muzzle (game does muzzle + dir * range)
-                    local o = typeof(first) == "Vector3" and first or cam().CFrame.Position
-                    local d = pos - o
-                    if d.Magnitude > 0.01 then return d.Unit end
-                    return res
-                end
-            if rt == "table" then
-                pcall(function()
-                    res.Position = pos
-                    res.AimPosition = pos
-                    res.Hit = part
-                end)
-                return res
-            end
+            local d = pos - origin
+            if d.Magnitude > 0.01 then return d.Unit, d.Magnitude end
         end
     end
-    return res
+    return res, mag
 end
 
 local traceWrapper = function(orig, a, b, ...)
-    local self, first = split(a, b)
-    if not state.unloaded and state.silent then
-        local part, pos = liveSilentPart()
-        if part then
-            if state.wallbangMode == "Hard" then
-                local o = typeof(first) == "table" and first.ForcedOrigin or nil
-                return forcedTrace(part, o)
+    local self, params = split(a, b)
+    if not state.unloaded and state.silent and type(params) == "table" and isLocalShooter(params) then
+        local part, pos = currentSilent()
+        if part and pos then
+            local origin = params.ForcedOrigin
+                or (params.Handle and params.Handle:FindFirstChild("Muzzle")
+                    and params.Handle.Muzzle.WorldPosition)
+                or cam().CFrame.Position
+            local d = pos - origin
+            if typeof(origin) == "Vector3" and d.Magnitude > 0.01 then
+                if state.wallbangMode ~= "Off" then
+                    local _, hp, hi, hn = bangHit(part, pos, origin)
+                    return hp, hi, hn
+                end
+                return pos, part, -d.Unit
             end
-            -- report the real character limb (not the Hitbox helper part) so the server accepts the hit
-            local o = typeof(first) == "table" and typeof(first.ForcedOrigin) == "Vector3" and first.ForcedOrigin or cam().CFrame.Position
-            local d = pos - o
-            if d.Magnitude > 0.01 then return pos, part, -d.Unit end
         end
     end
-    return callOrig(orig, self, first, ...)
+    return callOrig(orig, self, params, ...)
 end
 
-local canShootWrapper = function(orig, ...)
-    if not state.unloaded and state.rapidFire then return true end
+-- A reload legitimately blocks the shot, so forcing true through it lets the
+-- client fire into a locked gun.
+local function canShootWrapper(orig, ...)
+    if state.unloaded then return orig(...) end
+    if state.infiniteAmmo or state.rapidFire then
+        local tool = toolEquipped()
+        local rel = tool and (tool:FindFirstChild("Reloading") or tool:FindFirstChild("IsReloading"))
+        if rel and rel:IsA("BoolValue") and rel.Value then return orig(...) end
+        return true
+    end
     return orig(...)
+end
+
+--=====================================================================
+-- REMOTE HOOK
+--=====================================================================
+local function redirectRay(a)
+    local origin, dir
+    if typeof(a[1]) == "Ray" then
+        origin, dir = a[1].Origin, a[1].Direction
+    elseif typeof(a[1]) == "Vector3" and typeof(a[2]) == "Vector3" then
+        origin, dir = a[1], a[2]
+    else
+        return nil
+    end
+    if not origin or not dir or InVisRay then return nil end
+
+    local camPos = cam().CFrame.Position
+    local hrp = getRoot()
+    local nearCam = (origin - camPos).Magnitude < 24
+    local nearBody = hrp and (hrp.Position - origin).Magnitude < 24
+    if not (nearCam or nearBody) then return nil end
+
+    local part, pos = currentSilent()
+    if not part or not pos then return nil end
+
+    local nd = pos - origin
+    if nd.Magnitude < 0.001 then return nil end
+
+    local mag = math.max(dir.Magnitude, nd.Magnitude + 50)
+    if state.wallbangMode ~= "Off" then
+        mag = math.max(mag, nd.Magnitude + 2000)
+    end
+    return nd.Unit * mag
+end
+
+-- 1 ShootGun | 2 Handle | 3 origin | 4 pellet table (shotguns) |
+-- 5 hitPos | 6 hitInstance | 7 hitNormal | 8 range | 9 damage | 10 rawAim | 11 aimLockPart
+-- Uses only the per-frame cache: no engine calls, so it is safe inside namecall.
+local function rewriteShoot(a)
+    if not frame.valid or not frameSilentPart or not frameSilentPos then return nil end
+    local part, pos = frameSilentPart, frameSilentPos
+    local origin = a[3]
+    if typeof(origin) ~= "Vector3" then return nil end
+    local d = pos - origin
+    local dist = d.Magnitude
+    if dist < 0.01 then return nil end
+    local unit = d.Unit
+
+    local wall = state.wallbangMode ~= "Off"
+    local o = wall and frame.bangOrigin or origin
+    local hp = wall and frame.hitPos or pos
+    local hi = wall and frame.hitPart or part
+    local hn = wall and frame.hitNorm or -unit
+    if typeof(o) ~= "Vector3" or typeof(hp) ~= "Vector3" or typeof(hi) ~= "Instance" then
+        o, hp, hi, hn = origin, pos, part, -unit
+    end
+
+    local out = table.pack(table.unpack(a, 1, a.n))
+
+    out[3] = o
+    out[5], out[6], out[7] = hp, hi, hn
+
+    local bodyDist = frame.bodyDist > 0 and frame.bodyDist or dist
+    local rangeVal = state.rangeOverride and state.rangeValue or (tonumber(out[8]) or 0)
+    if bodyDist + 30 > rangeVal then rangeVal = bodyDist + 30 end
+    if rangeVal > 0 then out[8] = math.clamp(rangeVal, 1, 2000) end
+
+    local far = o + unit * (out[8] or dist)
+    if out[10] ~= nil then out[10] = far end
+    if out[11] ~= nil then out[11] = hi end
+
+    local pellets = out[4]
+    if type(pellets) == "table" then
+        for _, p in ipairs(pellets) do
+            if type(p) == "table" then
+                p.AimPosition = hp
+                p.RawAimPosition = far
+                p.Result1, p.Result2, p.Result3 = hp, hi, hn
+                p.AimLockPart = hi
+            end
+        end
+    end
+
+    if state.damageOverride then out[9] = state.damageValue end
+
+    if state.debugShots then
+        print(string.format("[snow] bang %s | dist %.1f | moved %.1f | reaches %s | part %s | range %.0f",
+            state.wallbangMode, dist, (o - origin).Magnitude,
+            tostring(hi.Parent == part.Parent), hi.Name, out[8] or 0))
+    end
+    return out
+end
+
+local hook = { remote = nil, nc = false, origNC = nil }
+
+local function installRemote()
+    if hook.remote or hook.nc or state.unloaded then return end
+    -- Namecall installs after load and is the one thing that has repeatedly taken
+    -- the client down at the five second mark, so it is opt-in. With Hook Mode Off
+    -- Remote mode fires its own corrected remote instead of moving anything.
+    if state.hookMode == "Off" then return end
+    local remote = getRemoteEvent()
+    if not remote then
+        warn("[snow] MainRemoteEvent missing - remote hook skipped")
+        return
+    end
+
+    -- rewriteShoot is cache-only, so no engine calls happen inside the hook.
+    if hookmetamethod and getrawmetatable then
+        local mt = getrawmetatable(game)
+        local nc = mt and mt.__namecall
+        if type(nc) == "function" then
+            hook.origNC = nc
+            -- Keep the shield from zombifying our namecall out from under us.
+            ProtectedFns[nc] = true
+            hook.nc = pcall(hookmetamethod, game, "__namecall", newcclosure(function(self, ...)
+                if state.unloaded then return hook.origNC(self, ...) end
+                if getnamecallmethod() ~= "FireServer" or self ~= remote then
+                    return hook.origNC(self, ...)
+                end
+                local a = table.pack(...)
+                if a[1] ~= "ShootGun" or not state.silent then return hook.origNC(self, ...) end
+                local ok, out = pcall(rewriteShoot, a)
+                if ok and out then return hook.origNC(self, table.unpack(out, 1, out.n)) end
+                return hook.origNC(self, ...)
+            end))
+            if hook.nc then
+                rem.live = true
+                print("[snow] remote hook: namecall")
+                return
+            end
+        end
+    end
+
+    if type(hookfunction) == "function" then
+        local ok, orig = pcall(hookfunction, remote.FireServer, newcclosure(function(self, ...)
+            if state.unloaded then return orig(self, ...) end
+            local a = table.pack(...)
+            if a[1] ~= "ShootGun" or not state.silent then return orig(self, ...) end
+            local ok2, out = pcall(rewriteShoot, a)
+            if ok2 and out then return orig(self, table.unpack(out, 1, out.n)) end
+            return orig(self, ...)
+        end))
+        if ok and type(orig) == "function" then
+            hook.remote = remote
+            rem.live = true
+            print("[snow] remote hook: instance")
+        end
+    end
+end
+
+local function uninstallRemote()
+    rem.live = false
+    if hook.remote then
+        pcall(function() restorefunction(hook.remote.FireServer) end)
+        hook.remote = nil
+    end
+    if hook.nc and hook.origNC then
+        pcall(hookmetamethod, game, "__namecall", hook.origNC)
+        hook.nc = false
+    end
 end
 
 local function installAll()
@@ -2750,13 +3560,15 @@ local function installAll()
     install("GetCanShoot", canShootWrapper)
     install("GetAim", getAimWrapper)
     install("Trace", traceWrapper)
-    print("[snow] hooks | Shoot:", okShoot and "yes" or "no", "| method:", SAFE and "table" or "hookfunction")
+    pcall(installRemote)
+    print("[snow] hooks | Shoot:", okShoot and "yes" or "no",
+        "| remote:", hook.nc and "namecall" or (hook.remote and "instance" or "none"))
     return okShoot
 end
 
 local function clearAll()
     if GunHandler then
-        for name, orig in pairs(originals) do
+        for name, orig in pairs(shots.originals) do
             if type(orig) == "function" then
                 pcall(function()
                     if restorefunction and not SAFE then restorefunction(orig) end
@@ -2765,152 +3577,213 @@ local function clearAll()
             end
         end
     end
-    originals = {}
-end
-
---=====================================================================
--- NAMECALL RAY REDIRECT
---=====================================================================
-local mt = getrawmetatable and getrawmetatable(game)
-local origNamecall = mt and mt.__namecall
-local namecallOn = false
-
-local RAY_METHODS = {
-    Raycast = true,
-    FindPartOnRay = true,
-    FindPartOnRayWithIgnoreList = true,
-    FindPartOnRayWithIgnoreLists = true,
-    FindPartOnRayWithWhitelist = true,
-}
-
-local function redirectRay(a)
-    local origin, dir
-    if typeof(a[1]) == "Ray" then
-        origin, dir = a[1].Origin, a[1].Direction
-    elseif typeof(a[1]) == "Vector3" and typeof(a[2]) == "Vector3" then
-        origin, dir = a[1], a[2]
-    else
-        return nil
-    end
-    if not origin or not dir then return nil end
-    if InVisRay then return nil end
-
-    local camPos = cam().CFrame.Position
-    local hrp = getRoot()
-    local nearCam = (origin - camPos).Magnitude < 24
-    local nearBody = hrp and (hrp.Position - origin).Magnitude < 24
-    if not (nearCam or nearBody) then return nil end
-
-    local part, pos = liveSilentPart()
-    if not part or not pos then return nil end
-
-    local nd = pos - origin
-    if nd.Magnitude < 0.001 then return nil end
-
-    local mag = math.max(dir.Magnitude, nd.Magnitude + 50)
-    if state.wallbangMode == "Hard" then
-        mag = math.max(mag, nd.Magnitude + 2000)
-    end
-    return nd.Unit * mag
-end
-
-local function installNamecall()
-    if namecallOn or not hookmetamethod or type(origNamecall) ~= "function" then return end
-    local ok = pcall(hookmetamethod, game, "__namecall", newcclosure(function(self, ...)
-        local m = getnamecallmethod()
-        if RAY_METHODS[m] then
-            local a = table.pack(...)
-            local dir = redirectRay(a)
-            if dir then
-                local out = {}
-                for i = 1, a.n do out[i] = a[i] end
-                if typeof(a[1]) == "Ray" then
-                    out[1] = Ray.new(a[1].Origin, dir)
-                else
-                    out[2] = dir
-                end
-                local ok2, res = pcall(origNamecall, self, table.unpack(out, 1, a.n))
-                if ok2 then return res end
-            end
-        end
-        return origNamecall(self, ...)
-    end))
-    namecallOn = ok
-    print("[snow] namecall hook:", ok and "ok" or "failed")
-end
-
-local function uninstallNamecall()
-    if namecallOn and origNamecall then
-        pcall(hookmetamethod, game, "__namecall", origNamecall)
-        namecallOn = false
-    end
+    shots.originals = {}
 end
 
 --=====================================================================
 -- ESP
 --=====================================================================
-local espData = {}
-local chams = {}
-local hasDrawing = Drawing ~= nil
+local esp = { data = {}, chams = {} }
+
+-- R15 and R6 skeletons. Whichever set the character actually has is the one
+-- that gets drawn, so this works on either rig without a setting.
+local R15_BONES = {
+    { "Head", "UpperTorso" },
+    { "UpperTorso", "LowerTorso" },
+    { "UpperTorso", "LeftUpperArm" }, { "LeftUpperArm", "LeftLowerArm" }, { "LeftLowerArm", "LeftHand" },
+    { "UpperTorso", "RightUpperArm" }, { "RightUpperArm", "RightLowerArm" }, { "RightLowerArm", "RightHand" },
+    { "LowerTorso", "LeftUpperLeg" }, { "LeftUpperLeg", "LeftLowerLeg" }, { "LeftLowerLeg", "LeftFoot" },
+    { "LowerTorso", "RightUpperLeg" }, { "RightUpperLeg", "RightLowerLeg" }, { "RightLowerLeg", "RightFoot" },
+}
+
+local R6_BONES = {
+    { "Head", "Torso" },
+    { "Torso", "Left Arm" }, { "Torso", "Right Arm" },
+    { "Torso", "Left Leg" }, { "Torso", "Right Leg" },
+}
+
+local function bonesFor(char)
+    if char:FindFirstChild("UpperTorso") then return R15_BONES end
+    if char:FindFirstChild("Torso") then return R6_BONES end
+    return nil
+end
 
 local function colorFor(plr)
-    local team = plr.Team ~= nil and LP.Team ~= nil and plr.Team == LP.Team
-    return team and state.espTeam or state.espEnemy
+    return sameTeam(plr) and state.espTeam or state.espEnemy
 end
 
 local function hideESP(t)
-    for _, o in pairs(t) do pcall(function() o.Visible = false end) end
+    for _, o in pairs(t) do
+        local ty = type(o)
+        if ty == "table" then
+            for _, oo in pairs(o) do pcall(function() oo.Visible = false end) end
+        elseif ty == "userdata" then
+            pcall(function() o.Visible = false end)
+        end
+    end
 end
 
 local function destroyESP(t)
-    for _, o in pairs(t) do pcall(function() o:Remove() end) end
+    for _, o in pairs(t) do
+        local ty = type(o)
+        if ty == "table" then
+            for _, oo in pairs(o) do pcall(function() oo:Remove() end) end
+        elseif ty == "userdata" then
+            pcall(function() o:Remove() end)
+        end
+    end
 end
 
 track(Players.PlayerRemoving:Connect(function(plr)
-    local t = espData[plr]
-    if t then destroyESP(t); espData[plr] = nil end
-    local h = chams[plr]
-    if h then pcall(function() h:Destroy() end); chams[plr] = nil end
+    local t = esp.data[plr]
+    if t then destroyESP(t); esp.data[plr] = nil end
+    local h = esp.chams[plr]
+    if h then pcall(function() h:Destroy() end); esp.chams[plr] = nil end
 end))
 
 local function buildESP()
     if not hasDrawing then return end
     for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LP and not espData[plr] then
-            local t = {}
+        if plr ~= LP and not esp.data[plr] then
+            local t = { bones = { under = {}, line = {} }, corner = { under = {}, line = {} } }
+            -- Outline objects are created first so they render behind their fill.
+            -- Drawing has no stroke property, so an outline is a thicker black
+            -- shape sitting under a thinner coloured one.
+            t.boxOutline = Drawing.new("Square"); t.boxOutline.Thickness = 3; t.boxOutline.Filled = false
+            t.boxOutline.Color = Color3.new(0, 0, 0); t.boxOutline.Visible = false
             t.box = Drawing.new("Square"); t.box.Thickness = 1; t.box.Filled = false
             t.name = Drawing.new("Text"); t.name.Size = 13; t.name.Center = true; t.name.Outline = true
-            t.hp = Drawing.new("Text"); t.hp.Size = 12; t.hp.Outline = true
+            t.hpOutline = Drawing.new("Square"); t.hpOutline.Filled = true; t.hpOutline.Color = Color3.new(0, 0, 0)
             t.hpBg = Drawing.new("Square"); t.hpBg.Filled = true
+            t.hpGhost = Drawing.new("Square"); t.hpGhost.Filled = true; t.hpGhost.Color = Color3.new(1, 1, 1)
             t.hpFill = Drawing.new("Square"); t.hpFill.Filled = true
+            t.hp = Drawing.new("Text"); t.hp.Size = 12; t.hp.Outline = true
             t.dist = Drawing.new("Text"); t.dist.Size = 12; t.dist.Center = true; t.dist.Outline = true
             t.tool = Drawing.new("Text"); t.tool.Size = 11; t.tool.Center = true; t.tool.Outline = true
             t.tracer = Drawing.new("Line"); t.tracer.Thickness = 1
-            espData[plr] = t
+            t.ghostHp = 1
+            esp.data[plr] = t
+        end
+    end
+end
+
+local function boneObjects(t, i)
+    if not t.bones.line[i] then
+        t.bones.under[i] = Drawing.new("Line")
+        t.bones.under[i].Thickness = 3
+        t.bones.under[i].Color = Color3.new(0, 0, 0)
+        t.bones.under[i].Visible = false
+        t.bones.line[i] = Drawing.new("Line")
+        t.bones.line[i].Thickness = 1
+        t.bones.line[i].Visible = false
+    end
+    return t.bones.under[i], t.bones.line[i]
+end
+
+local function renderSkeleton(char, t, col)
+    local set = bonesFor(char)
+    local used = 0
+    if set then
+        for _, pair in ipairs(set) do
+            local a = char:FindFirstChild(pair[1])
+            local b = char:FindFirstChild(pair[2])
+            if a and b and a:IsA("BasePart") and b:IsA("BasePart") then
+                local pa, onA = cam():WorldToViewportPoint(a.Position)
+                local pb, onB = cam():WorldToViewportPoint(b.Position)
+                if onA and onB and pa.Z > 0 and pb.Z > 0 then
+                    used = used + 1
+                    local under, line = boneObjects(t, used)
+                    under.From = Vector2.new(pa.X, pa.Y)
+                    under.To = Vector2.new(pb.X, pb.Y)
+                    under.Visible = state.espOutline
+                    line.From = under.From
+                    line.To = under.To
+                    line.Color = col
+                    line.Visible = true
+                end
+            end
+        end
+    end
+    for i = used + 1, #R15_BONES do
+        if t.bones.line[i] then
+            t.bones.line[i].Visible = false
+            t.bones.under[i].Visible = false
+        end
+    end
+end
+
+-- Eight short segments, two per corner. Length scales with the box so it stays
+-- proportional, but is floored and capped so a tiny box still reads as a corner
+-- bracket instead of a dot.
+local CORNER_SEGMENTS = 8
+
+local function cornerObjects(t, i)
+    if not t.corner.line[i] then
+        t.corner.under[i] = Drawing.new("Line")
+        t.corner.under[i].Thickness = 3
+        t.corner.under[i].Color = Color3.new(0, 0, 0)
+        t.corner.under[i].Visible = false
+        t.corner.line[i] = Drawing.new("Line")
+        t.corner.line[i].Thickness = 1
+        t.corner.line[i].Visible = false
+    end
+    return t.corner.under[i], t.corner.line[i]
+end
+
+local function renderCorners(t, x, y, w, h, col)
+    local len = math.clamp(w * 0.3, 4, 14)
+    local seg = {
+        { x, y, x + len, y },
+        { x, y, x, y + len },
+        { x + w, y, x + w - len, y },
+        { x + w, y, x + w, y + len },
+        { x, y + h, x + len, y + h },
+        { x, y + h, x, y + h - len },
+        { x + w, y + h, x + w - len, y + h },
+        { x + w, y + h, x + w, y + h - len },
+    }
+    for i = 1, CORNER_SEGMENTS do
+        local s = seg[i]
+        local under, line = cornerObjects(t, i)
+        under.From = Vector2.new(s[1], s[2])
+        under.To = Vector2.new(s[3], s[4])
+        under.Visible = state.espOutline
+        line.From = under.From
+        line.To = under.To
+        line.Color = col
+        line.Visible = true
+    end
+end
+
+local function hideCorners(t)
+    for i = 1, CORNER_SEGMENTS do
+        if t.corner.line[i] then
+            t.corner.line[i].Visible = false
+            t.corner.under[i].Visible = false
         end
     end
 end
 
 local function renderESP()
-    if not state.esp or state.unloaded then
-        for _, t in pairs(espData) do hideESP(t) end
-        for plr, h in pairs(chams) do pcall(function() h:Destroy() end); chams[plr] = nil end
+    if not state.esp or state.unloaded or not hasDrawing then
+        for _, t in pairs(esp.data) do hideESP(t) end
+        for plr, h in pairs(esp.chams) do pcall(function() h:Destroy() end); esp.chams[plr] = nil end
         return
     end
     buildESP()
 
     local camPos = cam().CFrame.Position
     local vp = cam().ViewportSize
-    local tracerOrigin = Vector2.new(vp.X / 2, vp.Y)
+    local tracerOriginPt = Vector2.new(vp.X / 2, vp.Y)
     if state.espTracerOrigin == "Top" then
-        tracerOrigin = Vector2.new(vp.X / 2, 0)
+        tracerOriginPt = Vector2.new(vp.X / 2, 0)
     elseif state.espTracerOrigin == "Middle" then
-        tracerOrigin = Vector2.new(vp.X / 2, vp.Y / 2)
+        tracerOriginPt = Vector2.new(vp.X / 2, vp.Y / 2)
     elseif state.espTracerOrigin == "Mouse" then
-        tracerOrigin = cursorPoint()
+        tracerOriginPt = cursorPoint()
     end
 
-    for plr, t in pairs(espData) do
+    for plr, t in pairs(esp.data) do
         local char = plr.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         local head = char and char:FindFirstChild("Head")
@@ -2923,15 +3796,33 @@ local function renderESP()
             local col = colorFor(plr)
 
             if onScreen and top.Z > 0 and dist <= state.espMaxDist then
-                local h = math.abs(bottom.Y - top.Y)
-                local w = h * 0.55
+                -- Floors keep the box readable at range. Without them the width
+                -- collapses to a couple of pixels and the outline swallows it.
+                local h = math.max(math.abs(bottom.Y - top.Y), 10)
+                local w = math.max(h * 0.55, 7)
                 local x = top.X - w / 2
                 local y = top.Y
 
-                t.box.Visible = state.espBox
-                t.box.Color = col
-                t.box.Position = Vector2.new(x, y)
-                t.box.Size = Vector2.new(w, h)
+                if state.espBox and state.espBoxStyle == "Full" then
+                    t.boxOutline.Visible = state.espOutline
+                    t.boxOutline.Position = Vector2.new(x - 1, y - 1)
+                    t.boxOutline.Size = Vector2.new(w + 2, h + 2)
+
+                    t.box.Visible = true
+                    t.box.Color = col
+                    t.box.Position = Vector2.new(x, y)
+                    t.box.Size = Vector2.new(w, h)
+
+                    hideCorners(t)
+                elseif state.espBox then
+                    t.box.Visible = false
+                    t.boxOutline.Visible = false
+                    renderCorners(t, x, y, w, h, col)
+                else
+                    t.box.Visible = false
+                    t.boxOutline.Visible = false
+                    hideCorners(t)
+                end
 
                 t.name.Visible = state.espName
                 t.name.Text = plr.Name
@@ -2940,23 +3831,44 @@ local function renderESP()
 
                 local maxHp = hum.MaxHealth > 0 and hum.MaxHealth or 100
                 local frac = math.clamp(hum.Health / maxHp, 0, 1)
+
+                -- Ghost bar drains toward the real value instead of snapping, so
+                -- chip damage stays readable for a moment.
+                if t.ghostHp < frac then
+                    t.ghostHp = frac
+                else
+                    t.ghostHp = t.ghostHp + (frac - t.ghostHp) * 0.12
+                end
+                local ghost = math.clamp(t.ghostHp, 0, 1)
+
                 local barCol = frac > 0.6 and Color3.fromRGB(70, 235, 130)
                     or (frac > 0.3 and Color3.fromRGB(245, 215, 90) or Color3.fromRGB(245, 80, 80))
 
+                local bx = x - 8
+                local bw = 3
+
+                t.hpOutline.Visible = state.espHealthBar and state.espOutline
+                t.hpOutline.Position = Vector2.new(bx - 1, y - 1)
+                t.hpOutline.Size = Vector2.new(bw + 2, h + 2)
+
                 t.hpBg.Visible = state.espHealthBar
                 t.hpBg.Color = Color3.fromRGB(18, 18, 22)
-                t.hpBg.Position = Vector2.new(x - 6, y)
-                t.hpBg.Size = Vector2.new(4, h)
+                t.hpBg.Position = Vector2.new(bx, y)
+                t.hpBg.Size = Vector2.new(bw, h)
+
+                t.hpGhost.Visible = state.espHealthBar and ghost > frac + 0.005
+                t.hpGhost.Position = Vector2.new(bx, y + h * (1 - ghost))
+                t.hpGhost.Size = Vector2.new(bw, h * ghost)
 
                 t.hpFill.Visible = state.espHealthBar
                 t.hpFill.Color = barCol
-                t.hpFill.Position = Vector2.new(x - 6, y + h * (1 - frac))
-                t.hpFill.Size = Vector2.new(4, h * frac)
+                t.hpFill.Position = Vector2.new(bx, y + h * (1 - frac))
+                t.hpFill.Size = Vector2.new(bw, h * frac)
 
                 t.hp.Visible = state.espHealth
-                t.hp.Text = tostring(math.floor(hum.Health))
+                t.hp.Text = string.format("%d/%d", math.floor(hum.Health), math.floor(maxHp))
                 t.hp.Color = barCol
-                t.hp.Position = Vector2.new(x - 26, y + h / 2 - 6)
+                t.hp.Position = Vector2.new(bx - 34, y + h / 2 - 6)
 
                 t.dist.Visible = state.espDist
                 t.dist.Text = math.floor(dist) .. "m"
@@ -2973,8 +3885,19 @@ local function renderESP()
 
                 t.tracer.Visible = state.espTracer
                 t.tracer.Color = col
-                t.tracer.From = tracerOrigin
+                t.tracer.From = tracerOriginPt
                 t.tracer.To = Vector2.new(x + w / 2, y + h)
+
+                if state.espSkeleton then
+                    renderSkeleton(char, t, col)
+                else
+                    for i = 1, #R15_BONES do
+                        if t.bones.line[i] then
+                            t.bones.line[i].Visible = false
+                            t.bones.under[i].Visible = false
+                        end
+                    end
+                end
             else
                 hideESP(t)
             end
@@ -2986,11 +3909,11 @@ local function renderESP()
     if state.espChams then
         for _, plr in ipairs(Players:GetPlayers()) do
             if plr ~= LP and plr.Character then
-                local h = chams[plr]
+                local h = esp.chams[plr]
                 if h and h.Parent ~= plr.Character then
-                    h:Destroy(); chams[plr] = nil
+                    h:Destroy(); esp.chams[plr] = nil
                 end
-                if not chams[plr] then
+                if not esp.chams[plr] then
                     local hl = Instance.new("Highlight")
                     hl.Name = "SnowChams"
                     hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
@@ -2998,7 +3921,7 @@ local function renderESP()
                     hl.OutlineColor = colorFor(plr)
                     hl.FillTransparency = 0.5
                     hl.Parent = plr.Character
-                    chams[plr] = hl
+                    esp.chams[plr] = hl
                 else
                     h.FillColor = colorFor(plr)
                     h.OutlineColor = colorFor(plr)
@@ -3006,14 +3929,216 @@ local function renderESP()
             end
         end
     else
-        for plr, h in pairs(chams) do pcall(function() h:Destroy() end); chams[plr] = nil end
+        for plr, h in pairs(esp.chams) do pcall(function() h:Destroy() end); esp.chams[plr] = nil end
     end
+end
+
+--=====================================================================
+-- GLOW / FORCEFIELD SKINS
+--=====================================================================
+-- A Highlight does the colour, a real ForceField does the pulsing shell. The
+-- ForceField is purely cosmetic on the client; the server still decides damage.
+local glow = { char = nil, ff = nil, gun = nil }
+
+local function clearGlows()
+    if glow.char then pcall(function() glow.char:Destroy() end); glow.char = nil end
+    if glow.ff then pcall(function() glow.ff:Destroy() end); glow.ff = nil end
+    if glow.gun then pcall(function() glow.gun:Destroy() end); glow.gun = nil end
+end
+
+local function ensureCharGlow(char)
+    if not glow.char or glow.char.Parent ~= char then
+        if glow.char then pcall(function() glow.char:Destroy() end) end
+        glow.char = Instance.new("Highlight")
+        glow.char.Name = "SnowCharGlow"
+        glow.char.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        glow.char.FillTransparency = 0.55
+        glow.char.OutlineTransparency = 0.15
+        glow.char.Parent = char
+    end
+    if not glow.ff or glow.ff.Parent ~= char then
+        if glow.ff then pcall(function() glow.ff:Destroy() end) end
+        glow.ff = Instance.new("ForceField")
+        glow.ff.Name = "SnowCharFF"
+        glow.ff.Visible = true
+        glow.ff.Parent = char
+    end
+end
+
+local function applyGlows()
+    local char = getChar()
+    if state.charGlow and char then
+        ensureCharGlow(char)
+        local c = glowColor(state.charGlowColor, state.charGlowRainbow)
+        glow.char.FillColor = c
+        glow.char.OutlineColor = c
+    elseif glow.char or glow.ff then
+        if glow.char then pcall(function() glow.char:Destroy() end); glow.char = nil end
+        if glow.ff then pcall(function() glow.ff:Destroy() end); glow.ff = nil end
+    end
+
+    local tool = toolEquipped()
+    if state.gunGlow and tool then
+        if not glow.gun or glow.gun.Parent ~= tool then
+            if glow.gun then pcall(function() glow.gun:Destroy() end) end
+            glow.gun = Instance.new("Highlight")
+            glow.gun.Name = "SnowGunGlow"
+            glow.gun.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            glow.gun.FillTransparency = 0.4
+            glow.gun.OutlineTransparency = 0.1
+            glow.gun.Parent = tool
+        end
+        local c = glowColor(state.gunGlowColor, state.gunGlowRainbow, 0.5)
+        glow.gun.FillColor = c
+        glow.gun.OutlineColor = c
+    elseif glow.gun then
+        pcall(function() glow.gun:Destroy() end)
+        glow.gun = nil
+    end
+end
+
+--=====================================================================
+-- CHINESE HAT
+--=====================================================================
+-- A stepped cone of thin cylinders welded to the head. Material.ForceField gives
+-- the shell shimmer without needing a ForceField instance per part.
+local HAT_SEGMENTS = 10
+local hat = { parts = {}, head = nil }
+
+local function clearHat()
+    for _, p in ipairs(hat.parts) do pcall(function() p:Destroy() end) end
+    hat.parts = {}
+    hat.head = nil
+end
+
+local function buildHat(head)
+    clearHat()
+    hat.head = head
+
+    for i = 1, HAT_SEGMENTS do
+        local f = (i - 1) / (HAT_SEGMENTS - 1)
+        local radius = (1.75 - f * 1.55) * state.hatSize
+
+        local p = Instance.new("Part")
+        p.Name = "SnowHat"
+        p.Shape = Enum.PartType.Cylinder
+        p.Size = Vector3.new(0.12, radius * 2, radius * 2)
+        p.Material = Enum.Material.ForceField
+        p.Transparency = state.hatTransparency
+        p.CanCollide = false
+        p.CanQuery = false
+        p.Massless = true
+        p.Anchored = false
+        p.CastShadow = false
+        p.Parent = head.Parent
+
+        local offset = CFrame.new(0, 0.55 + f * 0.85 + state.hatHeight, 0) * CFrame.Angles(0, 0, math.rad(90))
+        p.CFrame = head.CFrame * offset
+
+        local w = Instance.new("WeldConstraint")
+        w.Part0 = head
+        w.Part1 = p
+        w.Parent = p
+
+        table.insert(hat.parts, p)
+    end
+end
+
+local function paintHat()
+    for i, p in ipairs(hat.parts) do
+        if p.Parent then
+            p.Color = glowColor(state.hatColor, state.hatRainbow, i / HAT_SEGMENTS)
+            p.Transparency = state.hatTransparency
+        end
+    end
+end
+
+local function updateHat()
+    if not state.hat or state.unloaded then
+        if #hat.parts > 0 then clearHat() end
+        return
+    end
+    local char = getChar()
+    local head = char and char:FindFirstChild("Head")
+    if not head then
+        if #hat.parts > 0 then clearHat() end
+        return
+    end
+
+    -- Rebuild on respawn, or when a size change makes the existing cone wrong.
+    if head ~= hat.head or #hat.parts == 0 then
+        buildHat(head)
+    else
+        local wantR = (1.75) * state.hatSize
+        if math.abs(hat.parts[1].Size.Y / 2 - wantR) > 0.05 then
+            buildHat(head)
+        end
+    end
+    paintHat()
+end
+
+--=====================================================================
+-- SKYBOX
+--=====================================================================
+local SKY_PRESETS = {
+    Nebula = { 159454299, 159454300, 159454301, 159454302, 159454303, 159454304 },
+    Deep = { 159454299, 159454300, 159454301, 159454302, 159454303, 159454304 },
+}
+
+local sky = { inst = nil, saved = nil }
+
+local function applySky()
+    if state.unloaded then return end
+
+    if state.skyPreset == "Default" then
+        if sky.inst then pcall(function() sky.inst:Destroy() end); sky.inst = nil end
+        if sky.saved then
+            for _, s in ipairs(sky.saved) do pcall(function() s.Parent = Lighting end) end
+            sky.saved = nil
+        end
+        return
+    end
+
+    if not sky.saved then
+        sky.saved = {}
+        for _, s in ipairs(Lighting:GetChildren()) do
+            if s:IsA("Sky") then
+                table.insert(sky.saved, s)
+                s.Parent = nil
+            end
+        end
+    end
+
+    local ids
+    if state.skyPreset == "Custom" then
+        ids = {}
+        for n in tostring(state.skyCustom):gmatch("%d+") do table.insert(ids, n) end
+    else
+        ids = SKY_PRESETS[state.skyPreset]
+    end
+    if not ids or #ids < 6 then return end
+
+    if not sky.inst or not sky.inst.Parent then
+        if sky.inst then pcall(function() sky.inst:Destroy() end) end
+        sky.inst = Instance.new("Sky")
+        sky.inst.Name = "SnowSky"
+        sky.inst.Parent = Lighting
+    end
+
+    local prefix = "rbxassetid://"
+    sky.inst.SkyboxBk = prefix .. ids[1]
+    sky.inst.SkyboxDn = prefix .. ids[2]
+    sky.inst.SkyboxFt = prefix .. ids[3]
+    sky.inst.SkyboxLf = prefix .. ids[4]
+    sky.inst.SkyboxRt = prefix .. ids[5]
+    sky.inst.SkyboxUp = prefix .. ids[6]
+    sky.inst.StarCount = state.skyStars
+    sky.inst.CelestialBodiesShown = state.skySun
 end
 
 --=====================================================================
 -- CHARACTER / WORLD
 --=====================================================================
-local flyBV
 local savedLighting = {}
 
 local function applyCharacter()
@@ -3022,8 +4147,7 @@ local function applyCharacter()
     local root = getRoot()
     if not char or not hum or not root then return end
 
-    -- Speed
-    if state.speed then
+    if state.speed and not state.fly then
         if state.speedMode == "CFrame" then
             local moveDir = hum.MoveDirection
             if moveDir.Magnitude > 0 then
@@ -3034,48 +4158,22 @@ local function applyCharacter()
         end
     end
 
-    -- Jump Power / Jump Height
     if state.jump then
         hum.UseJumpPower = true
         hum.JumpPower = state.jumpValue
         pcall(function() hum.JumpHeight = state.jumpValue / 7 end)
     end
 
-    -- Hip Height
     if state.hipHeight then
         pcall(function() hum.HipHeight = state.hipValue end)
     end
 
-    -- Noclip (Sets CanCollide false across entire character)
-    if state.noclip then
+    if state.noclip or state.fly then
         for _, p in ipairs(char:GetDescendants()) do
             if p:IsA("BasePart") then
                 p.CanCollide = false
             end
         end
-    end
-
-    -- Fly
-    if state.fly and not flyBV then
-        flyBV = Instance.new("BodyVelocity")
-        flyBV.Name = "SnowFly"
-        flyBV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-        flyBV.Velocity = Vector3.zero
-        flyBV.Parent = root
-    elseif not state.fly and flyBV then
-        flyBV:Destroy()
-        flyBV = nil
-    end
-
-    if flyBV then
-        local dir = Vector3.zero
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += cam().CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= cam().CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += cam().CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir -= cam().CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.new(0, 1, 0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then dir -= Vector3.new(0, 1, 0) end
-        flyBV.Velocity = dir.Magnitude > 0 and dir.Unit * state.flySpeed or Vector3.zero
     end
 end
 
@@ -3096,22 +4194,207 @@ local function applyLighting()
         Lighting.OutdoorAmbient = savedLighting.outdoor
         Lighting.Brightness = savedLighting.brightness
         Lighting.ClockTime = savedLighting.clock
-        savedLighting = {}
+        savedLighting.ambient, savedLighting.outdoor = nil, nil
+        savedLighting.brightness, savedLighting.clock = nil, nil
     end
 
     if state.noFog then
-        if Lighting.FogEnd ~= 1e6 then
+        if not savedLighting.fog then
+            savedLighting.fog = { Lighting.FogStart, Lighting.FogEnd }
             Lighting.FogStart = 0
             Lighting.FogEnd = 1e6
         end
+    elseif savedLighting.fog then
+        Lighting.FogStart = savedLighting.fog[1]
+        Lighting.FogEnd = savedLighting.fog[2]
+        savedLighting.fog = nil
     end
+end
+
+--=====================================================================
+-- FLY
+--=====================================================================
+-- The humanoid is left running and only its WalkSpeed is zeroed. PlatformStand
+-- was the previous approach but it removes the humanoid's own upright force, so
+-- the character flops and the gyro has to fight it. With WalkSpeed at 0 there is
+-- no MoveDirection to fight either, so the body stays level on its own and the
+-- gyro only has to hold the facing.
+local fly = { bv = nil, gyro = nil, root = nil, vel = Vector3.zero, yaw = 0 }
+
+local function detachFlyBody()
+    if fly.bv then pcall(function() fly.bv:Destroy() end); fly.bv = nil end
+    if fly.gyro then pcall(function() fly.gyro:Destroy() end); fly.gyro = nil end
+end
+
+local function stopFly()
+    detachFlyBody()
+    fly.vel = Vector3.zero
+    fly.yaw = 0
+    fly.root = nil
+    local hum = getHum()
+    if hum then
+        pcall(function() hum.PlatformStand = false end)
+        pcall(function()
+            hum.WalkSpeed = (state.speed and state.speedMode == "WalkSpeed") and state.speedValue or 16
+        end)
+    end
+end
+
+local function attachFlyBody(root)
+    detachFlyBody()
+    fly.vel = Vector3.zero
+
+    fly.bv = Instance.new("BodyVelocity")
+    fly.bv.Name = "SnowFlyVel"
+    fly.bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    fly.bv.Velocity = Vector3.zero
+    fly.bv.Parent = root
+
+    -- Enough torque to hold a facing, not enough to snap the body around and
+    -- look like it is glitching.
+    fly.gyro = Instance.new("BodyGyro")
+    fly.gyro.Name = "SnowFlyGyro"
+    fly.gyro.MaxTorque = Vector3.new(8e5, 8e5, 8e5)
+    fly.gyro.P = 1200
+    fly.gyro.D = 70
+    fly.gyro.CFrame = root.CFrame
+    fly.gyro.Parent = root
+
+    fly.root = root
+end
+
+-- Horizontal movement is projected onto the XZ plane unless vertical mode is on,
+-- so looking at the floor while holding W keeps you at altitude instead of
+-- diving. Space and Ctrl are always the vertical pair.
+local function flyInput()
+    local dir = Vector3.zero
+    local cf = cam().CFrame
+    local right = cf.RightVector
+
+    if state.flyVertical then
+        local look = cf.LookVector
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += look end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= look end
+    else
+        local look = Vector3.new(cf.LookVector.X, 0, cf.LookVector.Z)
+        if look.Magnitude < 0.01 then look = Vector3.new(0, 0, -1) end
+        look = look.Unit
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += look end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= look end
+    end
+
+    local flatRight = Vector3.new(right.X, 0, right.Z)
+    if flatRight.Magnitude > 0.01 then
+        flatRight = flatRight.Unit
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += flatRight end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir -= flatRight end
+    end
+
+    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.new(0, 1, 0) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then dir -= Vector3.new(0, 1, 0) end
+
+    -- Normalise after summing so diagonals are not 1.41x faster than cardinals.
+    if dir.Magnitude > 0 then dir = dir.Unit end
+    return dir
+end
+
+--=====================================================================
+-- SPINBOT
+--=====================================================================
+-- The root is rotated incrementally rather than driven by a gyro so it composes
+-- with the speed feature, which also writes root.CFrame. While flying the gyro
+-- owns rotation instead, so the accumulated angle is handed to it and the root
+-- write is skipped.
+--
+-- Humanoid.AutoRotate is cut while spinning. Otherwise the walk controller
+-- rewrites the body's facing toward MoveDirection every frame and the spin only
+-- survives while standing still. Movement is unaffected: direction comes from
+-- camera-relative input, not from which way the model points.
+local spin = { angle = 0, autoOff = false }
+
+local function restoreAutoRotate()
+    if not spin.autoOff then return end
+    spin.autoOff = false
+    local hum = getHum()
+    if hum then pcall(function() hum.AutoRotate = true end) end
+end
+
+local function spinStep(dt)
+    if not state.spinbot or state.unloaded then
+        restoreAutoRotate()
+        return
+    end
+
+    local hum = getHum()
+    if hum and hum.AutoRotate then
+        pcall(function() hum.AutoRotate = false end)
+        spin.autoOff = true
+    end
+
+    local rad = math.rad(state.spinSpeed) * dt
+    if state.spinAxis == "Yaw" then
+        spin.angle = (spin.angle + rad) % (math.pi * 2)
+    end
+    if state.fly then return end
+
+    local root = getRoot()
+    if not root then return end
+
+    -- Re-applied after the walk controller has already run this frame, so a
+    -- movement update cannot land on top of the spin.
+    local cf
+    if state.spinAxis == "Pitch" then
+        cf = CFrame.Angles(rad, 0, 0)
+    elseif state.spinAxis == "Roll" then
+        cf = CFrame.Angles(0, 0, rad)
+    else
+        cf = CFrame.Angles(0, rad, 0)
+    end
+    root.CFrame = root.CFrame * cf
+end
+
+local function updateFly(dt)
+    if not state.fly then
+        if fly.bv or fly.gyro then stopFly() end
+        return
+    end
+
+    local root = getRoot()
+    local hum = getHum()
+    if not root or not hum then
+        -- Dead or between respawns: drop the joints so the next frame rebuilds
+        -- them against the new root instead of a destroyed one.
+        if fly.bv or fly.gyro then detachFlyBody() end
+        return
+    end
+
+    if root ~= fly.root or not fly.bv or not fly.bv.Parent then
+        attachFlyBody(root)
+    end
+
+    hum.WalkSpeed = 0
+
+    local target = flyInput() * state.flySpeed
+    fly.vel = fly.vel:Lerp(target, 1 - math.exp(-dt * state.flySmooth))
+    fly.bv.Velocity = fly.vel
+
+    -- Yaw is smoothed separately from the velocity so a fast mouse flick does
+    -- not whip the model around in one frame.
+    local flat = Vector3.new(cam().CFrame.LookVector.X, 0, cam().CFrame.LookVector.Z)
+    local wantYaw = flat.Magnitude > 0.01 and math.atan2(-flat.X, -flat.Z) or 0
+    if state.spinbot then wantYaw += spin.angle end
+    local diff = wantYaw - fly.yaw
+    while diff > math.pi do diff -= math.pi * 2 end
+    while diff < -math.pi do diff += math.pi * 2 end
+    fly.yaw = fly.yaw + diff * (1 - math.exp(-dt * 16))
+
+    fly.gyro.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, fly.yaw, 0)
 end
 
 --=====================================================================
 -- MAIN LOOP
 --=====================================================================
-local lastAttack = 0
-local lastTrigger = 0
+local timers = { attack = 0, trigger = 0 }
 
 local function snaplineFrom(origin)
     if origin == "Mouse" then return cursorPoint() end
@@ -3130,119 +4413,226 @@ local function snaplineFrom(origin)
     return cursorPoint()
 end
 
-track(RunService.RenderStepped:Connect(function()
+track(RunService.RenderStepped:Connect(function(dt)
     if state.unloaded then return end
 
     local mpos = cursorPoint()
-    aimCircle.Position = Vector2.new(mpos.X, mpos.Y + state.aimCircleY)
-    aimCircle.Radius = state.aimFov
-    aimCircle.Color = state.aimColor
-    aimCircle.Visible = state.aimCircle and state.aimbot
+    spinStep(dt)
+    updateFly(dt)
 
-    silentCircle.Position = Vector2.new(mpos.X, mpos.Y + state.silentCircleY)
-    silentCircle.Radius = state.silentFov
-    silentCircle.Color = state.silentColor
-    silentCircle.Visible = state.silentCircle and state.silent
+    if state.silent then
+        frameSilentPart, frameSilentPos = liveSilentPart()
+    else
+        frameSilentPart, frameSilentPos = nil, nil
+    end
 
-    -- aimbot
-    local aimTarget = nil
-    if state.aimbot and mouseFree() then
-        aimTarget = findTarget(state.aimPart, state.aimFov, state.aimTeamCheck, state.aimVisible, mpos)
-        if aimTarget then
-            local part = getPart(aimTarget, state.aimPart)
-            if part then
-                local pos = predict(part, 1, "aim")
-                local alpha = math.clamp(state.aimSmooth / 100, 0.02, 1)
-                if state.aimMode == "Mouse" then
-                    local sp, on = cam():WorldToViewportPoint(pos)
-                    if on then
-                        local dx = sp.X - mpos.X
-                        local dy = sp.Y - mpos.Y
-                        pcall(function()
-                            mousemoverel(dx * alpha, dy * alpha)
-                        end)
-                    end
-                else
-                    local goal = CFrame.lookAt(cam().CFrame.Position, pos)
-                    cam().CFrame = cam().CFrame:Lerp(goal, alpha)
+    -- Build the whole payload here so the namecall hook stays engine-free.
+    frame.valid = false
+    frame.bangOrigin, frame.hitPos, frame.hitPart, frame.hitNorm = nil, nil, nil, nil
+    frame.bodyDist = 0
+    if frameSilentPart and frameSilentPos and frameSilentPart.Parent then
+        local model = frameSilentPart:FindFirstAncestorOfClass("Model")
+        local hum = model and model:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health > 0 then
+            frame.valid = true
+
+            local char = getChar()
+            local tool = toolEquipped()
+            local handle = tool and tool:FindFirstChild("Handle")
+            local hand = char and (char:FindFirstChild("RightHand") or char:FindFirstChild("Right Arm"))
+
+            -- While the joint is cut the Handle floats free, so the true muzzle is
+            -- the hand. Otherwise the Handle is still where the game put it.
+            local baseOrigin
+            if grip.weld then
+                baseOrigin = (hand and hand.Position) or cam().CFrame.Position
+            elseif handle then
+                baseOrigin = handle.Position
+            else
+                baseOrigin = cam().CFrame.Position
+            end
+
+            if state.wallbangMode ~= "Off" then
+                frame.bangOrigin, frame.hitPos, frame.hitPart, frame.hitNorm =
+                    bangHit(frameSilentPart, frameSilentPos, baseOrigin)
+            else
+                frame.bangOrigin, frame.hitPos, frame.hitPart, frame.hitNorm =
+                    baseOrigin, frameSilentPos, frameSilentPart, nil
+            end
+
+            if state.wallbangMode == "Remote" then
+                -- Nothing moves in Remote mode; the extra FireServer carries it.
+                if grip.weld then restoreGrip(handle, hand) end
+            elseif handle and frameSilentPart and frame.bangOrigin
+                and state.wallbangMode ~= "Off"
+                and state.shiftHandle
+                and (frame.bangOrigin - baseOrigin).Magnitude > 0.5 then
+                grip.hold = os.clock()
+                local gripped = breakGrip(handle, hand)
+                handle.CFrame = CFrame.new(frame.bangOrigin) * (handle.CFrame - handle.CFrame.Position)
+                if state.debugShots and os.clock() - grip.log > 1 then
+                    grip.log = os.clock()
+                    print(string.format("[snow] shift %.1f | grip %s | handle %s",
+                        (frame.bangOrigin - baseOrigin).Magnitude,
+                        gripped and "cut" or "NOT FOUND", handle:GetFullName()))
                 end
+            elseif grip.weld and os.clock() - grip.hold > 0.25 then
+                restoreGrip(handle, hand)
+            end
+
+            local root = getRoot()
+            frame.bodyDist = root and (frameSilentPos - root.Position).Magnitude or 0
+        end
+    elseif grip.weld then
+        restoreGrip(toolEquipped() and toolEquipped():FindFirstChild("Handle"),
+            getChar() and (getChar():FindFirstChild("RightHand") or getChar():FindFirstChild("Right Arm")))
+    end
+
+    if hasDrawing then
+        draw.aimCircle.Position = Vector2.new(mpos.X, mpos.Y + state.aimCircleY)
+        draw.aimCircle.Radius = state.aimFov
+        draw.aimCircle.Color = state.aimColor
+        draw.aimCircle.Visible = state.aimCircle and state.aimbot
+
+        draw.silentCircle.Position = Vector2.new(mpos.X, mpos.Y + state.silentCircleY)
+        draw.silentCircle.Radius = state.silentFov
+        draw.silentCircle.Color = state.silentColor
+        draw.silentCircle.Visible = state.silentCircle and state.silent
+    end
+
+    local aimTarget, aimPart = nil, nil
+    if state.aimbot and mouseFree() then
+        aimTarget, aimPart = findTarget(state.aimPart, state.aimFov, state.aimTeamCheck, state.aimVisible, mpos)
+        if aimTarget and aimPart then
+            local pos = predict(aimPart, 1, "aim")
+            local alpha = math.clamp(state.aimSmooth / 100, 0.02, 1)
+            if state.aimMode == "Mouse" then
+                local sp, on = cam():WorldToViewportPoint(pos)
+                if on then
+                    local dx = sp.X - mpos.X
+                    local dy = sp.Y - mpos.Y
+                    pcall(function()
+                        mousemoverel(dx * alpha, dy * alpha)
+                    end)
+                end
+            else
+                local goal = CFrame.lookAt(cam().CFrame.Position, pos)
+                cam().CFrame = cam().CFrame:Lerp(goal, alpha)
             end
         end
     end
 
-    -- aim snapline
-    if state.aimSnapline and state.aimbot and aimTarget then
-        local part = getPart(aimTarget, state.aimPart)
-        if part then
-            local sp, on = cam():WorldToViewportPoint(part.Position)
+    if hasDrawing then
+        if state.aimSnapline and state.aimbot and aimPart then
+            local sp, on = cam():WorldToViewportPoint(aimPart.Position)
             if on and sp.Z > 0 then
-                aimSnapline.Visible = true
-                aimSnapline.Color = state.aimSnaplineColor
-                aimSnapline.Thickness = state.aimSnaplineWidth
-                aimSnapline.From = snaplineFrom(state.aimSnaplineOrigin)
-                aimSnapline.To = Vector2.new(sp.X, sp.Y)
+                draw.aimSnapline.Visible = true
+                draw.aimSnapline.Color = state.aimSnaplineColor
+                draw.aimSnapline.Thickness = state.aimSnaplineWidth
+                draw.aimSnapline.From = snaplineFrom(state.aimSnaplineOrigin)
+                draw.aimSnapline.To = Vector2.new(sp.X, sp.Y)
             else
-                aimSnapline.Visible = false
+                draw.aimSnapline.Visible = false
             end
         else
-            aimSnapline.Visible = false
+            draw.aimSnapline.Visible = false
         end
-    else
-        aimSnapline.Visible = false
-    end
 
-    -- silent snapline
-    if state.silentSnapline and state.silent then
-        local part, pos = liveSilentPart()
-        if part and pos then
-            local sp, on = cam():WorldToViewportPoint(pos)
-            if on and sp.Z > 0 then
-                silentSnapline.Visible = true
-                silentSnapline.Color = state.silentSnaplineColor
-                silentSnapline.Thickness = state.silentSnaplineWidth
-                silentSnapline.From = snaplineFrom(state.silentSnaplineOrigin)
-                silentSnapline.To = Vector2.new(sp.X, sp.Y)
+        if state.silentSnapline and state.silent then
+            local part, pos = currentSilent()
+            if part and pos then
+                local sp, on = cam():WorldToViewportPoint(pos)
+                if on and sp.Z > 0 then
+                    draw.silentSnapline.Visible = true
+                    draw.silentSnapline.Color = state.silentSnaplineColor
+                    draw.silentSnapline.Thickness = state.silentSnaplineWidth
+                    draw.silentSnapline.From = snaplineFrom(state.silentSnaplineOrigin)
+                    draw.silentSnapline.To = Vector2.new(sp.X, sp.Y)
+                else
+                    draw.silentSnapline.Visible = false
+                end
             else
-                silentSnapline.Visible = false
+                draw.silentSnapline.Visible = false
             end
         else
-            silentSnapline.Visible = false
+            draw.silentSnapline.Visible = false
         end
-    else
-        silentSnapline.Visible = false
+
+        -- Anti-aim viewer: the signed yaw gap between where the body points and
+        -- where the camera points, drawn as an arrow from the silent FOV centre.
+        -- Positive body yaw is counter-clockwise from above, which is leftward on
+        -- screen, so the direction vector is (-sin, -cos).
+        local aaRoot = getRoot()
+        if state.antiAimViewer and aaRoot then
+            local bl = aaRoot.CFrame.LookVector
+            local cl = cam().CFrame.LookVector
+            local delta = math.atan2(-bl.X, -bl.Z) - math.atan2(-cl.X, -cl.Z)
+            while delta > math.pi do delta -= math.pi * 2 end
+            while delta < -math.pi do delta += math.pi * 2 end
+
+            local centre = Vector2.new(mpos.X, mpos.Y + state.silentCircleY)
+            local tip = centre + Vector2.new(-math.sin(delta), -math.cos(delta)) * state.antiAimLength
+
+            draw.aaLine.Visible = true
+            draw.aaLine.Color = state.antiAimColor
+            draw.aaLine.From = centre
+            draw.aaLine.To = tip
+
+            draw.aaText.Visible = true
+            draw.aaText.Text = string.format("%.0f", math.deg(delta))
+            draw.aaText.Color = state.antiAimColor
+            draw.aaText.Position = tip + Vector2.new(0, -14)
+        else
+            draw.aaLine.Visible = false
+            draw.aaText.Visible = false
+        end
+
+        renderTracers()
     end
 
-    -- triggerbot
-    if state.trigger and mouseFree() and os.clock() - lastTrigger > state.triggerDelay then
+    if state.trigger and mouseFree() and os.clock() - timers.trigger > state.triggerDelay then
         local t = findTarget(state.triggerPart, state.triggerFov, state.triggerTeamCheck, true, mpos)
         if t then
-            lastTrigger = os.clock()
-            pcall(function() VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0) end)
-            task.wait(0.02)
-            pcall(function() VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0) end)
+            timers.trigger = os.clock()
+            task.spawn(function()
+                pcall(fireRemoteShot)
+                pcall(function() VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0) end)
+                task.wait(0.02)
+                pcall(function() VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0) end)
+            end)
         end
     end
 
-    -- auto attack
     if state.autoAttack then
         local tool = toolEquipped()
-        if tool and os.clock() - lastAttack >= 0.15 then
-            lastAttack = os.clock()
+        if tool and os.clock() - timers.attack >= 0.15 then
+            timers.attack = os.clock()
+            pcall(fireRemoteShot)
             pcall(function() tool:Activate() end)
         end
     end
+
+    renderESP()
 end))
 
 track(RunService.Heartbeat:Connect(function()
     if state.unloaded then return end
     applyCharacter()
     applyLighting()
-    renderESP()
+    applyGlows()
+    updateHat()
+    pollHits()
 
     local tool = toolEquipped()
+    releaseStaleLocks(tool)
     if tool then
         attachLocks(tool)
-        if state.infiniteAmmo then pushLocks(tool) end
+        if state.infiniteAmmo then
+            for _, v in ipairs(tool:GetDescendants()) do
+                if v:IsA("IntValue") and v.Name:lower():find("ammo") then v.Value = state.maxAmmo end
+                if v:IsA("NumberValue") and v.Name:lower():find("ammo") then v.Value = state.maxAmmo end
+            end
+        end
         if state.autoReload then
             local ammo = tool:FindFirstChild("Ammo")
             if ammo and ammo:IsA("ValueBase") and ammo.Value <= 0 then
@@ -3257,7 +4647,8 @@ track(RunService.Heartbeat:Connect(function()
 end))
 
 track(UserInputService.JumpRequest:Connect(function()
-    if state.infJump and not state.unloaded then
+    if state.unloaded or state.fly then return end
+    if state.infJump then
         local hum = getHum()
         if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
     end
@@ -3275,7 +4666,7 @@ end))
 --=====================================================================
 -- WINDOW
 --=====================================================================
-local Window = Library.CreateWindow({
+Window = Library.CreateWindow({
     Title = "snow.cc",
     Game = "Zee Hood",
     Link = "discord.gg/snowcc",
@@ -3284,249 +4675,464 @@ local Window = Library.CreateWindow({
 })
 Library.CurrentWindow = Window
 
+-- Unload is defined below the tab builders but the Settings tab's button needs a
+-- reference to it, so it is forward-declared here and assigned further down. The
+-- button wraps it rather than capturing it directly, because the local is still
+-- nil at the moment the button is built.
+local Unload
+
 --=====================================================================
 -- AIMBOT TAB
 --=====================================================================
-local AimTab = Window:CreateTab("Aimbot")
-local AimGroup = AimTab:CreateGroupbox("Aimbot", "Left")
-local aimToggle = AimGroup:AddToggle("Enabled", false, { Keybind = Enum.KeyCode.E, Callback = function(v) state.aimbot = v end })
-register("aim.enabled", aimToggle.SetValue, false)
-AimGroup:AddDropdown("Aim mode", { "Camera", "Mouse" }, "Camera", function(v) state.aimMode = v end)
-AimGroup:AddDropdown("Aim part", { "Head", "Torso", "HumanoidRootPart" }, "Head", function(v) state.aimPart = v end)
-local fovS = AimGroup:AddSlider("FOV", 20, 800, 150, "px", function(v) state.aimFov = v end)
-register("aim.fov", fovS.SetValue, 150)
-local smoothS = AimGroup:AddSlider("Smoothing", 1, 100, 25, "%", function(v) state.aimSmooth = v end)
-register("aim.smooth", smoothS.SetValue, 25)
-AimGroup:AddToggle("Prediction", true, { Callback = function(v) state.aimPrediction = v end })
-AimGroup:AddToggle("Team Check", true, { Callback = function(v) state.aimTeamCheck = v end })
-AimGroup:AddToggle("Visible Only", false, { Callback = function(v) state.aimVisible = v end })
-AimGroup:AddToggle("FOV Circle", true, { Callback = function(v) state.aimCircle = v end })
-AimGroup:AddColorPicker("Circle Colour", Color3.fromRGB(0, 175, 255), function(c) state.aimColor = c end)
+-- Each tab is built inside its own block. The tab objects are all reachable
+-- through Window.Tabs once CreateTab returns, so nothing outside needs the
+-- locals, and letting them go out of scope at the block end is what keeps this
+-- region from exhausting the register budget on its own.
+do
+    local AimTab = Window:CreateTab("Aimbot")
+    local AimGroup = AimTab:CreateGroupbox("Aimbot", "Left")
+    local aimToggle = AimGroup:AddToggle("Enabled", false, { Keybind = Enum.KeyCode.E, Callback = function(v) state.aimbot = v end })
+    register("aim.enabled", aimToggle, false)
+    AimGroup:AddDropdown("Aim mode", { "Camera", "Mouse" }, "Camera", function(v) state.aimMode = v end)
+    AimGroup:AddDropdown("Aim part", { "Head", "Closest", "Hitbox", "Torso", "HumanoidRootPart", "Adaptive" }, "Head", function(v) state.aimPart = v end)
+    local fovS = AimGroup:AddSlider("FOV", 20, 800, 150, "px", function(v) state.aimFov = v end)
+    register("aim.fov", fovS, 150)
+    local smoothS = AimGroup:AddSlider("Smoothing", 1, 100, 25, "%", function(v) state.aimSmooth = v end)
+    register("aim.smooth", smoothS, 25)
+    AimGroup:AddToggle("Prediction", true, { Callback = function(v) state.aimPrediction = v end })
+    AimGroup:AddToggle("Team Check", true, { Callback = function(v) state.aimTeamCheck = v end })
+    AimGroup:AddToggle("Visible Only", false, { Callback = function(v) state.aimVisible = v end })
+    AimGroup:AddToggle("FOV Circle", true, { Callback = function(v) state.aimCircle = v end })
+    local aimCY = AimGroup:AddSlider("Circle Y Offset", -300, 300, 0, "px", function(v) state.aimCircleY = v end)
+    register("aim.circley", aimCY, 0)
+    AimGroup:AddColorPicker("Circle Colour", Color3.fromRGB(0, 175, 255), function(c) state.aimColor = c end)
 
-local AimVis = AimTab:CreateGroupbox("Aim Snapline", "Right")
-AimVis:AddToggle("Show", false, { Callback = function(v) state.aimSnapline = v end })
-AimVis:AddDropdown("From", { "Gun", "Mouse", "Bottom" }, "Gun", function(v) state.aimSnaplineOrigin = v end)
-local asw = AimVis:AddSlider("Width", 1, 6, 1, "px", function(v) state.aimSnaplineWidth = v end)
-register("aim.snapwidth", asw.SetValue, 1)
-AimVis:AddColorPicker("Colour", Color3.fromRGB(0, 175, 255), function(c) state.aimSnaplineColor = c end)
+    local AimVis = AimTab:CreateGroupbox("Aim Snapline", "Right")
+    AimVis:AddToggle("Show", false, { Callback = function(v) state.aimSnapline = v end })
+    AimVis:AddDropdown("From", { "Gun", "Mouse", "Bottom" }, "Gun", function(v) state.aimSnaplineOrigin = v end)
+    local asw = AimVis:AddSlider("Width", 1, 6, 1, "px", function(v) state.aimSnaplineWidth = v end)
+    register("aim.snapwidth", asw, 1)
+    AimVis:AddColorPicker("Colour", Color3.fromRGB(0, 175, 255), function(c) state.aimSnaplineColor = c end)
 
-local TrigGroup = AimTab:CreateGroupbox("Triggerbot", "Right")
-TrigGroup:AddToggle("Enabled", false, { Keybind = Enum.KeyCode.T, Callback = function(v) state.trigger = v end })
-TrigGroup:AddDropdown("Hit part", { "Head", "Torso", "HumanoidRootPart" }, "Head", function(v) state.triggerPart = v end)
-local trigFovS = TrigGroup:AddSlider("FOV", 20, 800, 150, "px", function(v) state.triggerFov = v end)
-register("trigger.fov", trigFovS.SetValue, 150)
-TrigGroup:AddToggle("Team Check", true, { Callback = function(v) state.triggerTeamCheck = v end })
-local tdS = TrigGroup:AddSlider("Delay", 10, 500, 80, "ms", function(v) state.triggerDelay = v / 1000 end)
-register("trigger.delay", tdS.SetValue, 80)
+    local TrigGroup = AimTab:CreateGroupbox("Triggerbot", "Right")
+    TrigGroup:AddToggle("Enabled", false, { Keybind = Enum.KeyCode.T, Callback = function(v) state.trigger = v end })
+    TrigGroup:AddDropdown("Hit part", { "Head", "Closest", "Hitbox", "Torso", "HumanoidRootPart" }, "Head", function(v) state.triggerPart = v end)
+    local trigFovS = TrigGroup:AddSlider("FOV", 20, 800, 150, "px", function(v) state.triggerFov = v end)
+    register("trigger.fov", trigFovS, 150)
+    TrigGroup:AddToggle("Team Check", true, { Callback = function(v) state.triggerTeamCheck = v end })
+    local tdS = TrigGroup:AddSlider("Delay", 10, 500, 80, "ms", function(v) state.triggerDelay = v / 1000 end)
+    register("trigger.delay", tdS, 80)
+end
 
 --=====================================================================
 -- SILENT TAB
 --=====================================================================
-local SilentTab = Window:CreateTab("Silent")
-local SilentGroup = SilentTab:CreateGroupbox("Silent Aim", "Left")
-local silToggle = SilentGroup:AddToggle("Enabled", false, { Keybind = Enum.KeyCode.Q, Callback = function(v) state.silent = v end })
-register("silent.enabled", silToggle.SetValue, false)
-SilentGroup:AddDropdown("Hit limb", { "HumanoidRootPart", "Head", "Torso", "Adaptive" }, "HumanoidRootPart", function(v) state.silentPart = v end)
-SilentGroup:AddToggle("Knock Check", true, { Callback = function(v) state.knockCheck = v end })
-SilentGroup:AddToggle("Spread Condenser (Pellet Lock)", true, { Callback = function(v) state.spreadCondenser = v end })
-local silFov = SilentGroup:AddSlider("FOV", 20, 800, 300, "px", function(v) state.silentFov = v end)
-register("silent.fov", silFov.SetValue, 300)
-local silChance = SilentGroup:AddSlider("Hit Chance", 1, 100, 100, "%", function(v) state.silentChance = v end)
-register("silent.chance", silChance.SetValue, 100)
-SilentGroup:AddToggle("Team Check", true, { Callback = function(v) state.silentTeamCheck = v end })
-SilentGroup:AddDropdown("Wallbang", { "Off", "Soft", "Hard" }, "Off", function(v) state.wallbangMode = v end)
-SilentGroup:AddToggle("Prediction", true, { Callback = function(v) state.silentPrediction = v end })
-local silPredSlider = SilentGroup:AddSlider("Prediction Factor", 0, 200, 100, "%", function(v) state.silentPredictionFactor = v / 100 end)
-register("silent.predfactor", silPredSlider.SetValue, 100)
-SilentGroup:AddToggle("Show FOV Circle", false, { Callback = function(v) state.silentCircle = v end })
-SilentGroup:AddColorPicker("Circle Colour", Color3.fromRGB(0, 200, 255), function(c) state.silentColor = c end)
+do
+    local SilentTab = Window:CreateTab("Silent")
+    local SilentGroup = SilentTab:CreateGroupbox("Silent Aim", "Left")
+    local silToggle = SilentGroup:AddToggle("Enabled", false, { Keybind = Enum.KeyCode.Q, Callback = function(v) state.silent = v end })
+    register("silent.enabled", silToggle, false)
+    SilentGroup:AddDropdown("Hit limb", { "Closest", "Hitbox", "HumanoidRootPart", "Head", "Torso", "Adaptive" }, "Hitbox", function(v) state.silentPart = v end)
+    SilentGroup:AddToggle("Knock Check", true, { Callback = function(v) state.knockCheck = v end })
+    SilentGroup:AddToggle("Spread Condenser (Pellet Lock)", true, { Callback = function(v) state.spreadCondenser = v end })
+    local silFov = SilentGroup:AddSlider("FOV", 20, 800, 300, "px", function(v) state.silentFov = v end)
+    register("silent.fov", silFov, 300)
+    local silChance = SilentGroup:AddSlider("Hit Chance", 1, 100, 100, "%", function(v) state.silentChance = v end)
+    register("silent.chance", silChance, 100)
+    SilentGroup:AddToggle("Team Check", true, { Callback = function(v) state.silentTeamCheck = v end })
+    SilentGroup:AddToggle("Visible Only", false, { Callback = function(v) state.silentVisibleOnly = v end })
+    SilentGroup:AddSegmented("Wallbang", { "Off", "Remote", "Soft", "Hard", "Snap" }, "Remote", function(v) state.wallbangMode = v end)
+    SilentGroup:AddToggle("Shift Handle", true, { Callback = function(v) state.shiftHandle = v end })
+    local wbMax = SilentGroup:AddSlider("Wallbang Max Move", 4, 300, 28, "st", function(v) state.wallbangMax = v end)
+    register("silent.wbmax", wbMax, 28)
+    SilentGroup:AddToggle("Debug Shots", false, { Callback = function(v) state.debugShots = v end })
+    SilentGroup:AddToggle("Prediction", true, { Callback = function(v) state.silentPrediction = v end })
+    local silPredSlider = SilentGroup:AddSlider("Prediction Factor", 0, 200, 100, "%", function(v) state.silentPredictionFactor = v / 100 end)
+    register("silent.predfactor", silPredSlider, 100)
+    SilentGroup:AddToggle("Show FOV Circle", false, { Callback = function(v) state.silentCircle = v end })
+    local silCY = SilentGroup:AddSlider("Circle Y Offset", -300, 300, 0, "px", function(v) state.silentCircleY = v end)
+    register("silent.circley", silCY, 0)
+    SilentGroup:AddColorPicker("Circle Colour", Color3.fromRGB(0, 200, 255), function(c) state.silentColor = c end)
 
-local SilVis = SilentTab:CreateGroupbox("Silent Snapline", "Right")
-SilVis:AddToggle("Show", false, { Callback = function(v) state.silentSnapline = v end })
-SilVis:AddDropdown("From", { "Gun", "Mouse", "Bottom" }, "Gun", function(v) state.silentSnaplineOrigin = v end)
-local ssw = SilVis:AddSlider("Width", 1, 6, 1, "px", function(v) state.silentSnaplineWidth = v end)
-register("silent.snapwidth", ssw.SetValue, 1)
-SilVis:AddColorPicker("Colour", Color3.fromRGB(0, 200, 255), function(c) state.silentSnaplineColor = c end)
+    local SilVis = SilentTab:CreateGroupbox("Silent Snapline", "Right")
+    SilVis:AddToggle("Show", false, { Callback = function(v) state.silentSnapline = v end })
+    SilVis:AddDropdown("From", { "Gun", "Mouse", "Bottom" }, "Gun", function(v) state.silentSnaplineOrigin = v end)
+    local ssw = SilVis:AddSlider("Width", 1, 6, 1, "px", function(v) state.silentSnaplineWidth = v end)
+    register("silent.snapwidth", ssw, 1)
+    SilVis:AddColorPicker("Colour", Color3.fromRGB(0, 200, 255), function(c) state.silentSnaplineColor = c end)
 
-local GunGroup = SilentTab:CreateGroupbox("Gun Mods", "Right")
-GunGroup:AddToggle("Infinite Ammo", false, { Callback = function(v) state.infiniteAmmo = v; pushLocks(toolEquipped()) end })
-local maxAmmoSlider = GunGroup:AddSlider("Ammo Value", 30, 9999, 999, "", function(v) state.maxAmmo = v; pushLocks(toolEquipped()) end)
-register("gun.maxammo", maxAmmoSlider.SetValue, 999)
-GunGroup:AddToggle("Rapid Fire (hold LMB)", false, { Callback = function(v) state.rapidFire = v; pushLocks(toolEquipped()) end })
-local cdSlider = GunGroup:AddSlider("Fire Cooldown", 10, 500, 30, "ms", function(v) state.fireCooldown = v / 1000; pushLocks(toolEquipped()) end)
-register("gun.cooldown", cdSlider.SetValue, 30)
-GunGroup:AddToggle("Damage Override", false, { Callback = function(v) state.damageOverride = v; pushLocks(toolEquipped()) end })
-local dmgSlider = GunGroup:AddSlider("Damage", 1, 500, 100, "", function(v) state.damageValue = v; pushLocks(toolEquipped()) end)
-register("gun.damage", dmgSlider.SetValue, 100)
-GunGroup:AddToggle("Range Override", false, { Callback = function(v) state.rangeOverride = v; pushLocks(toolEquipped()) end })
-local rangeSlider = GunGroup:AddSlider("Range", 50, 3000, 500, "", function(v) state.rangeValue = v; pushLocks(toolEquipped()) end)
-register("gun.range", rangeSlider.SetValue, 500)
-GunGroup:AddToggle("Auto Reload", false, { Callback = function(v) state.autoReload = v end })
-GunGroup:AddToggle("Auto Attack", false, { Callback = function(v) state.autoAttack = v end })
+    local AaGroup = SilentTab:CreateGroupbox("Anti-Aim Viewer", "Right")
+    AaGroup:AddToggle("Show", false, { Callback = function(v) state.antiAimViewer = v end })
+    local aaLen = AaGroup:AddSlider("Length", 20, 200, 80, "px", function(v) state.antiAimLength = v end)
+    register("aa.length", aaLen, 80)
+    AaGroup:AddColorPicker("Colour", Color3.fromRGB(0, 200, 255), function(c) state.antiAimColor = c end)
+
+    local GunGroup = SilentTab:CreateGroupbox("Gun Mods", "Right")
+    GunGroup:AddToggle("Infinite Ammo", false, { Callback = function(v) state.infiniteAmmo = v; pushLocks(toolEquipped()) end })
+    local maxAmmoSlider = GunGroup:AddSlider("Ammo Value", 30, 9999, 999, "", function(v) state.maxAmmo = v; pushLocks(toolEquipped()) end)
+    register("gun.maxammo", maxAmmoSlider, 999)
+    GunGroup:AddToggle("Rapid Fire (hold LMB)", false, { Callback = function(v) state.rapidFire = v; pushLocks(toolEquipped()) end })
+    local cdSlider = GunGroup:AddSlider("Fire Cooldown", 10, 500, 30, "ms", function(v) state.fireCooldown = v / 1000; pushLocks(toolEquipped()) end)
+    register("gun.cooldown", cdSlider, 30)
+    GunGroup:AddToggle("Damage Override", false, { Callback = function(v) state.damageOverride = v; pushLocks(toolEquipped()) end })
+    local dmgSlider = GunGroup:AddSlider("Damage", 1, 500, 100, "", function(v) state.damageValue = v; pushLocks(toolEquipped()) end)
+    register("gun.damage", dmgSlider, 100)
+    GunGroup:AddToggle("Range Override", false, { Callback = function(v) state.rangeOverride = v; pushLocks(toolEquipped()) end })
+    local rangeSlider = GunGroup:AddSlider("Range", 50, 3000, 500, "", function(v) state.rangeValue = v; pushLocks(toolEquipped()) end)
+    register("gun.range", rangeSlider, 500)
+    GunGroup:AddToggle("Auto Reload", false, { Callback = function(v) state.autoReload = v end })
+    GunGroup:AddToggle("Auto Attack", false, { Callback = function(v) state.autoAttack = v end })
+end
 
 --=====================================================================
 -- ESP TAB
 --=====================================================================
-local EspTab = Window:CreateTab("ESP")
-local EspGroup = EspTab:CreateGroupbox("Players", "Left")
-EspGroup:AddToggle("Enabled", false, { Keybind = Enum.KeyCode.F, Callback = function(v) state.esp = v end })
-EspGroup:AddToggle("Box", true, { Callback = function(v) state.espBox = v end })
-EspGroup:AddToggle("Name", true, { Callback = function(v) state.espName = v end })
-EspGroup:AddToggle("Health Text", true, { Callback = function(v) state.espHealth = v end })
-EspGroup:AddToggle("Health Bar", true, { Callback = function(v) state.espHealthBar = v end })
-EspGroup:AddToggle("Distance", true, { Callback = function(v) state.espDist = v end })
-EspGroup:AddToggle("Equipped Tool", true, { Callback = function(v) state.espTool = v end })
-EspGroup:AddToggle("Tracer", false, { Callback = function(v) state.espTracer = v end })
-EspGroup:AddDropdown("Tracer Origin", { "Bottom", "Top", "Middle", "Mouse" }, "Bottom", function(v) state.espTracerOrigin = v end)
-EspGroup:AddToggle("Chams", false, { Callback = function(v) state.espChams = v end })
-local distS = EspGroup:AddSlider("Max Distance", 100, 5000, 1500, "m", function(v) state.espMaxDist = v end)
-register("esp.maxdist", distS.SetValue, 1500)
-EspGroup:AddColorPicker("Enemy Colour", Color3.fromRGB(255, 60, 60), function(c) state.espEnemy = c end)
-EspGroup:AddColorPicker("Team Colour", Color3.fromRGB(60, 255, 120), function(c) state.espTeam = c end)
+do
+    local EspTab = Window:CreateTab("ESP")
+    local EspGroup = EspTab:CreateGroupbox("Players", "Left")
+    EspGroup:AddToggle("Enabled", false, { Keybind = Enum.KeyCode.F, Callback = function(v) state.esp = v end })
+    EspGroup:AddToggle("Box", true, { Callback = function(v) state.espBox = v end })
+    EspGroup:AddDropdown("Box Style", { "Full", "Corner" }, "Full", function(v) state.espBoxStyle = v end)
+    EspGroup:AddToggle("Outline", true, { Callback = function(v) state.espOutline = v end })
+    EspGroup:AddToggle("Skeleton", false, { Callback = function(v) state.espSkeleton = v end })
+    EspGroup:AddToggle("Name", true, { Callback = function(v) state.espName = v end })
+    EspGroup:AddToggle("Health Text", true, { Callback = function(v) state.espHealth = v end })
+    EspGroup:AddToggle("Health Bar", true, { Callback = function(v) state.espHealthBar = v end })
+    EspGroup:AddToggle("Distance", true, { Callback = function(v) state.espDist = v end })
+    EspGroup:AddToggle("Equipped Tool", true, { Callback = function(v) state.espTool = v end })
+    EspGroup:AddToggle("Tracer", false, { Callback = function(v) state.espTracer = v end })
+    EspGroup:AddDropdown("Tracer Origin", { "Bottom", "Top", "Middle", "Mouse" }, "Bottom", function(v) state.espTracerOrigin = v end)
+    EspGroup:AddToggle("Chams", false, { Callback = function(v) state.espChams = v end })
+    local distS = EspGroup:AddSlider("Max Distance", 100, 5000, 1500, "m", function(v) state.espMaxDist = v end)
+    register("esp.maxdist", distS, 1500)
+    EspGroup:AddColorPicker("Enemy Colour", Color3.fromRGB(255, 60, 60), function(c) state.espEnemy = c end)
+    EspGroup:AddColorPicker("Team Colour", Color3.fromRGB(60, 255, 120), function(c) state.espTeam = c end)
+end
 
 --=====================================================================
 -- CHARACTER TAB
 --=====================================================================
-local CharTab = Window:CreateTab("Character")
-local MoveGroup = CharTab:CreateGroupbox("Movement", "Left")
-MoveGroup:AddToggle("Speed", false, { Keybind = Enum.KeyCode.Z, Callback = function(v) state.speed = v end })
-MoveGroup:AddDropdown("Speed Mode", { "CFrame", "WalkSpeed" }, "CFrame", function(v) state.speedMode = v end)
-local spdS = MoveGroup:AddSlider("Speed Value", 16, 300, 24, "", function(v) state.speedValue = v end)
-register("char.speed", spdS.SetValue, 24)
-MoveGroup:AddToggle("Jump Power", false, { Callback = function(v) state.jump = v end })
-local jmpS = MoveGroup:AddSlider("Jump Value", 50, 400, 55, "", function(v) state.jumpValue = v end)
-register("char.jump", jmpS.SetValue, 55)
-MoveGroup:AddToggle("Hip Height", false, { Callback = function(v) state.hipHeight = v end })
-local hipS = MoveGroup:AddSlider("Hip Value", 0, 20, 2, "", function(v) state.hipValue = v end)
-register("char.hip", hipS.SetValue, 2)
-MoveGroup:AddToggle("Fly", false, { Keybind = Enum.KeyCode.G, Callback = function(v) state.fly = v end })
-local flyS = MoveGroup:AddSlider("Fly Speed", 10, 300, 60, "", function(v) state.flySpeed = v end)
-register("char.flyspeed", flyS.SetValue, 60)
-MoveGroup:AddToggle("Noclip", false, { Callback = function(v) state.noclip = v end })
-MoveGroup:AddToggle("Infinite Jump", false, { Callback = function(v) state.infJump = v end })
+do
+    local CharTab = Window:CreateTab("Character")
+    local MoveGroup = CharTab:CreateGroupbox("Movement", "Left")
+    MoveGroup:AddToggle("Speed", false, { Keybind = Enum.KeyCode.Z, Callback = function(v) state.speed = v end })
+    MoveGroup:AddDropdown("Speed Mode", { "CFrame", "WalkSpeed" }, "CFrame", function(v) state.speedMode = v end)
+    local spdS = MoveGroup:AddSlider("Speed Value", 16, 300, 24, "", function(v) state.speedValue = v end)
+    register("char.speed", spdS, 24)
+    MoveGroup:AddToggle("Jump Power", false, { Callback = function(v) state.jump = v end })
+    local jmpS = MoveGroup:AddSlider("Jump Value", 50, 400, 55, "", function(v) state.jumpValue = v end)
+    register("char.jump", jmpS, 55)
+    MoveGroup:AddToggle("Hip Height", false, { Callback = function(v) state.hipHeight = v end })
+    local hipS = MoveGroup:AddSlider("Hip Value", 0, 20, 2, "", function(v) state.hipValue = v end)
+    register("char.hip", hipS, 2)
+    MoveGroup:AddToggle("Fly", false, { Keybind = Enum.KeyCode.G, Callback = function(v)
+        state.fly = v
+        if not v then pcall(stopFly) end
+    end })
+    local flyS = MoveGroup:AddSlider("Fly Speed", 10, 300, 60, "", function(v) state.flySpeed = v end)
+    register("char.flyspeed", flyS, 60)
+    local flySm = MoveGroup:AddSlider("Fly Smoothing", 0, 100, 45, "%", function(v)
+        state.flySmooth = 30 * (1 - v / 100) ^ 2 + 2
+    end)
+    register("char.flysmooth", flySm, 45)
+    MoveGroup:AddToggle("Fly Vertical (camera pitch)", false, { Callback = function(v) state.flyVertical = v end })
+    MoveGroup:AddToggle("Noclip", false, { Callback = function(v) state.noclip = v end })
+    MoveGroup:AddToggle("Infinite Jump", false, { Callback = function(v) state.infJump = v end })
 
-local MiscGroup = CharTab:CreateGroupbox("Utility", "Right")
-MiscGroup:AddToggle("Anti AFK", true, { Callback = function(v) state.antiAfk = v end })
-MiscGroup:AddButton("Rejoin Server", function()
-    pcall(function() TeleportService:Teleport(game.PlaceId, LP) end)
-end)
-MiscGroup:AddButton("Server Hop", function()
-    task.spawn(function()
-        local ok, res = pcall(function()
-            return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?limit=100"))
-        end)
-        if ok and res and res.data then
-            for _, s in ipairs(res.data) do
-                if s.playing < s.maxPlayers and s.id ~= game.JobId then
-                    pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, s.id, LP) end)
-                    return
-                end
-            end
-        end
+    local TracerGroup = CharTab:CreateGroupbox("Bullet Tracers", "Left")
+    TracerGroup:AddToggle("Enabled", false, { Callback = function(v) state.tracer = v end })
+    TracerGroup:AddDropdown("Style", { "Line", "Thick", "Glow" }, "Line", function(v) state.tracerStyle = v end)
+    local trW = TracerGroup:AddSlider("Width", 1, 8, 2, "px", function(v) state.tracerWidth = v end)
+    register("tracer.width", trW, 2)
+    local trLife = TracerGroup:AddSlider("Lifetime", 5, 100, 35, "%", function(v) state.tracerLife = v / 100 end)
+    register("tracer.life", trLife, 35)
+    TracerGroup:AddColorPicker("Colour", Color3.fromRGB(255, 220, 90), function(c) state.tracerColor = c end)
+
+    local GlowGroup = CharTab:CreateGroupbox("Forcefields", "Left")
+    GlowGroup:AddToggle("Character Glow", false, { Callback = function(v) state.charGlow = v end })
+    GlowGroup:AddToggle("Character Rainbow", false, { Callback = function(v) state.charGlowRainbow = v end })
+    GlowGroup:AddColorPicker("Character Colour", Color3.fromRGB(0, 200, 255), function(c) state.charGlowColor = c end)
+    GlowGroup:AddToggle("Gun Glow", false, { Callback = function(v) state.gunGlow = v end })
+    GlowGroup:AddToggle("Gun Rainbow", false, { Callback = function(v) state.gunGlowRainbow = v end })
+    GlowGroup:AddColorPicker("Gun Colour", Color3.fromRGB(0, 200, 255), function(c) state.gunGlowColor = c end)
+    local rbS = GlowGroup:AddSlider("Rainbow Speed", 5, 100, 30, "%", function(v) state.rainbowSpeed = v end)
+    register("glow.rainbowspeed", rbS, 30)
+
+    local SpinGroup = CharTab:CreateGroupbox("Spinbot", "Right")
+    SpinGroup:AddToggle("Enabled", false, { Callback = function(v)
+        state.spinbot = v
+        if not v then pcall(restoreAutoRotate) end
+    end })
+    SpinGroup:AddDropdown("Axis", { "Yaw", "Pitch", "Roll" }, "Yaw", function(v) state.spinAxis = v end)
+    local spinS = SpinGroup:AddSlider("Speed", 30, 3600, 720, " deg/s", function(v) state.spinSpeed = v end)
+    register("char.spinspeed", spinS, 720)
+
+    local HatGroup = CharTab:CreateGroupbox("Chinese Hat", "Right")
+    HatGroup:AddToggle("Enabled", false, { Callback = function(v)
+        state.hat = v
+        if not v then pcall(clearHat) end
+    end })
+    HatGroup:AddToggle("Rainbow", true, { Callback = function(v) state.hatRainbow = v end })
+    HatGroup:AddColorPicker("Colour", Color3.fromRGB(255, 210, 90), function(c) state.hatColor = c end)
+    local hatSizeS = HatGroup:AddSlider("Size", 30, 200, 100, "%", function(v) state.hatSize = v / 100 end)
+    register("hat.size", hatSizeS, 100)
+    local hatTrS = HatGroup:AddSlider("Transparency", 0, 90, 35, "%", function(v) state.hatTransparency = v / 100 end)
+    register("hat.transparency", hatTrS, 35)
+    local hatHS = HatGroup:AddSlider("Height", -30, 60, 0, "st", function(v) state.hatHeight = v / 10 end)
+    register("hat.height", hatHS, 0)
+
+    local MiscGroup = CharTab:CreateGroupbox("Utility", "Right")
+    MiscGroup:AddToggle("Anti AFK", true, { Callback = function(v) state.antiAfk = v end })
+    MiscGroup:AddButton("Rejoin Server", function()
         pcall(function() TeleportService:Teleport(game.PlaceId, LP) end)
     end)
-end)
+    MiscGroup:AddButton("Server Hop", function()
+        task.spawn(function()
+            local ok, res = pcall(function()
+                return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?limit=100"))
+            end)
+            if ok and res and res.data then
+                for _, s in ipairs(res.data) do
+                    if s.playing < s.maxPlayers and s.id ~= game.JobId then
+                        pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, s.id, LP) end)
+                        return
+                    end
+                end
+            end
+            pcall(function() TeleportService:Teleport(game.PlaceId, LP) end)
+        end)
+    end)
+
+    local TpGroup = CharTab:CreateGroupbox("Teleport", "Right")
+
+    local tpDrop
+    local function refreshTpList()
+        local list = {}
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LP then
+                local c = plr.Character
+                local r = c and c:FindFirstChild("HumanoidRootPart")
+                if r then table.insert(list, plr.Name) end
+            end
+        end
+        table.sort(list)
+        if #list == 0 then list = { "Nobody" } end
+        if tpDrop then pcall(tpDrop.SetOptions, list, list[1]) end
+    end
+
+    tpDrop = TpGroup:AddDropdown("Player", { "Nobody" }, "Nobody")
+
+    local tpOffS = TpGroup:AddSlider("Offset", 2, 12, 4, " studs", function(v) state.tpOffset = v end)
+    register("char.tpoffset", tpOffS, 4)
+
+    local function teleportTo(name)
+        if not name or name == "Nobody" then return end
+        local target
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr.Name == name then target = plr break end
+        end
+        if not target then return end
+
+        local tChar = target.Character
+        local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+        if not tRoot then return end
+
+        local myRoot, myHum = getRoot(), getHum()
+        if not myRoot or not myHum then return end
+
+        local back = tRoot.CFrame.LookVector * -(state.tpOffset or 4)
+        local goal = tRoot.Position + back + Vector3.new(0, 3, 0)
+
+        myRoot.CFrame = CFrame.new(goal) * (myRoot.CFrame - myRoot.CFrame.Position)
+
+        if myHum.PlatformStand or myHum:GetState() == Enum.HumanoidStateType.Physics then
+            pcall(function() myHum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+        end
+    end
+
+    TpGroup:AddButton("Teleport", function()
+        teleportTo(tpDrop:GetValue())
+    end)
+
+    TpGroup:AddButton("Refresh List", function()
+        refreshTpList()
+    end)
+
+    task.spawn(function()
+        task.wait(1)
+        while not state.unloaded do
+            pcall(refreshTpList)
+            task.wait(2)
+        end
+    end)
+end
 
 --=====================================================================
 -- WORLD TAB
 --=====================================================================
-local WorldTab = Window:CreateTab("World")
-local WorldGroup = WorldTab:CreateGroupbox("Lighting", "Left")
-WorldGroup:AddToggle("Fullbright", false, { Callback = function(v) state.fullbright = v end })
-WorldGroup:AddToggle("No Fog", false, { Callback = function(v) state.noFog = v end })
+do
+    local WorldTab = Window:CreateTab("World")
+
+    local LightGroup = WorldTab:CreateGroupbox("Lighting", "Left")
+    LightGroup:AddToggle("Fullbright", false, { Callback = function(v) state.fullbright = v end })
+    LightGroup:AddToggle("No Fog", false, { Callback = function(v) state.noFog = v end })
+
+    local SkyGroup = WorldTab:CreateGroupbox("Skybox", "Left")
+    SkyGroup:AddDropdown("Preset", { "Default", "Nebula", "Custom" }, "Default", function(v)
+        state.skyPreset = v
+        applySky()
+    end)
+    SkyGroup:AddTextbox("Custom IDs", "", "bk,dn,ft,lf,rt,up", function(v)
+        state.skyCustom = v
+        if state.skyPreset == "Custom" then applySky() end
+    end)
+    local skyStars = SkyGroup:AddSlider("Stars", 0, 5000, 3000, "", function(v)
+        state.skyStars = v
+        if sky.inst then sky.inst.StarCount = v end
+    end)
+    register("sky.stars", skyStars, 3000)
+    SkyGroup:AddToggle("Sun & Moon", true, { Callback = function(v)
+        state.skySun = v
+        if sky.inst then sky.inst.CelestialBodiesShown = v end
+    end })
+
+    local SoundGroup = WorldTab:CreateGroupbox("Hit Sounds", "Right")
+    SoundGroup:AddToggle("Enabled", false, { Callback = function(v) state.hitSound = v end })
+    SoundGroup:AddDropdown("Sound", { "Sword Slash", "Sword Lunge", "Blade", "Click", "Bass", "Pop" }, "Sword Slash", function(v)
+        state.hitSoundId = HIT_SOUNDS[v] or ""
+    end)
+    local hsVol = SoundGroup:AddSlider("Volume", 5, 100, 60, "%", function(v) state.hitSoundVolume = v / 100 end)
+    register("sound.volume", hsVol, 60)
+    local hsPitch = SoundGroup:AddSlider("Pitch", 50, 200, 100, "%", function(v) state.hitSoundPitch = v / 100 end)
+    register("sound.pitch", hsPitch, 100)
+    SoundGroup:AddButton("Preview", function()
+        playHitSound()
+    end)
+end
 
 --=====================================================================
 -- SETTINGS TAB
 --=====================================================================
-local SetTab = Window:CreateTab("Settings")
-local CfgGroup = SetTab:CreateGroupbox("Config", "Left")
+do
+    local SetTab = Window:CreateTab("Settings")
+    local CfgGroup = SetTab:CreateGroupbox("Config", "Left")
 
-local function saveConfig()
-    local data = {}
-    for k, v in pairs(flags) do
-        local val = setters[k]
-        if val then data[k] = flags[k] end
-    end
-    pcall(function() writefile("snowcc_zeehood.json", HttpService:JSONEncode(data)) end)
-    print("[snow] config saved")
-end
-
-local function loadConfig()
-    local ok, raw = pcall(function() return readfile("snowcc_zeehood.json") end)
-    if not ok or not raw then return end
-    local ok2, data = pcall(function() return HttpService:JSONDecode(raw) end)
-    if not ok2 or type(data) ~= "table" then return end
-    for k, v in pairs(data) do
-        local setter = setters[k]
-        if setter then pcall(setter, v) end
-    end
-    print("[snow] config loaded")
-end
-
-CfgGroup:AddButton("Save Config", saveConfig)
-CfgGroup:AddButton("Load Config", loadConfig)
-
-local AcGroup = SetTab:CreateGroupbox("Anti-Cheat", "Right")
-AcGroup:AddToggle("AC Bypass (Shield)", true, {
-    Callback = function(v)
-        Shield.on = v
-        if v then
-            task.spawn(armShield)
-        else
-            restoreShield()
-            print("[snow] shield disabled")
+    local function saveConfig()
+        local data = {}
+        for k, get in pairs(reg.getters) do
+            local ok, val = pcall(get)
+            if ok then data[k] = val end
         end
-    end,
-})
-AcGroup:AddButton("Rescan Detectors", function()
-    Shield.cands = {}
-    Shield.lastFull = 0
-    task.spawn(armShield)
-end)
-AcGroup:AddButton("Dump GunHandler", function()
-    if not GunHandler then print("[snow] GunHandler missing") return end
-    local keys = {}
-    for k, v in pairs(GunHandler) do table.insert(keys, tostring(k) .. "=" .. typeof(v)) end
-    print("[snow] GunHandler: " .. table.concat(keys, ", "))
-end)
+        pcall(function() writefile("snowcc_zeehood.json", HttpService:JSONEncode(data)) end)
+        print("[snow] config saved")
+    end
 
-local AboutGroup = SetTab:CreateGroupbox("About", "Right")
-AboutGroup:AddButton("snow.cc | Zee Hood build", function() end)
-AboutGroup:AddButton("Menu toggle: RightShift", function() end)
+    local function loadConfig()
+        local ok, raw = pcall(function() return readfile("snowcc_zeehood.json") end)
+        if not ok or not raw then return end
+        local ok2, data = pcall(function() return HttpService:JSONDecode(raw) end)
+        if not ok2 or type(data) ~= "table" then return end
+        for k, v in pairs(data) do
+            local setter = reg.setters[k]
+            if setter then pcall(setter, v) end
+        end
+        print("[snow] config loaded")
+    end
+
+    CfgGroup:AddButton("Save Config", saveConfig)
+    CfgGroup:AddButton("Load Config", loadConfig)
+
+    local AcGroup = SetTab:CreateGroupbox("Anti-Cheat", "Right")
+    AcGroup:AddToggle("AC Bypass (Shield)", true, {
+        Callback = function(v)
+            Shield.on = v
+            if v then
+                task.spawn(armShield)
+            else
+                restoreShield()
+                print("[snow] shield disabled")
+            end
+        end,
+    })
+    AcGroup:AddButton("Rescan Detectors", function()
+        Shield.cands = {}
+        Shield.lastFull = 0
+        task.spawn(armShield)
+    end)
+    AcGroup:AddDropdown("Hook Mode", { "Off", "Namecall", "Auto" }, "Off", function(v)
+        state.hookMode = v
+        pcall(uninstallRemote)
+        if v ~= "Off" then pcall(installRemote) end
+    end)
+    AcGroup:AddButton("Reinstall Hooks", function()
+        pcall(uninstallRemote)
+        pcall(installAll)
+    end)
+    AcGroup:AddButton("Dump GunHandler", function()
+        if not GunHandler then print("[snow] GunHandler missing") return end
+        local keys = {}
+        for k, v in pairs(GunHandler) do table.insert(keys, tostring(k) .. "=" .. typeof(v)) end
+        print("[snow] GunHandler: " .. table.concat(keys, ", "))
+    end)
+
+    local AboutGroup = SetTab:CreateGroupbox("About", "Right")
+    AboutGroup:AddButton("snow.cc | Zee Hood build", function() end)
+    AboutGroup:AddButton("Menu toggle: RightShift", function() end)
+    AboutGroup:AddButton("Unload Script", function()
+        if Unload then Unload() end
+    end)
+end
 
 --=====================================================================
 -- UNLOAD
 --=====================================================================
-local function Unload()
+function Unload()
     state.unloaded = true
-    for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+    for _, c in ipairs(con.live) do pcall(function() c:Disconnect() end) end
+    for _, c in ipairs(con.ui) do pcall(function() c:Disconnect() end) end
+    for _, c in ipairs(Library.Conns) do pcall(function() c:Disconnect() end) end
     pcall(clearAll)
-    pcall(uninstallNamecall)
+    pcall(uninstallRemote)
     pcall(restoreShield)
-    for _, t in pairs(espData) do destroyESP(t) end
-    for _, h in pairs(chams) do pcall(function() h:Destroy() end) end
-    pcall(function() aimCircle:Remove() end)
-    pcall(function() silentCircle:Remove() end)
-    pcall(function() aimSnapline:Remove() end)
-    pcall(function() silentSnapline:Remove() end)
-    if flyBV then pcall(function() flyBV:Destroy() end) end
+    pcall(restoreGrip)
+    pcall(stopFly)
+    pcall(restoreAutoRotate)
+    pcall(clearGlows)
+    pcall(clearHat)
+    pcall(clearTracers)
+    state.skyPreset = "Default"
+    pcall(applySky)
+    for t in pairs(locks.byTool) do detachLocks(t) end
+    for _, t in pairs(esp.data) do destroyESP(t) end
+    for _, h in pairs(esp.chams) do pcall(function() h:Destroy() end) end
+    if draw.aimCircle then pcall(function() draw.aimCircle:Remove() end) end
+    if draw.silentCircle then pcall(function() draw.silentCircle:Remove() end) end
+    if draw.aimSnapline then pcall(function() draw.aimSnapline:Remove() end) end
+    if draw.silentSnapline then pcall(function() draw.silentSnapline:Remove() end) end
+    if draw.aaLine then pcall(function() draw.aaLine:Remove() end) end
+    if draw.aaText then pcall(function() draw.aaText:Remove() end) end
     if savedLighting.ambient then
         Lighting.Ambient = savedLighting.ambient
         Lighting.OutdoorAmbient = savedLighting.outdoor
         Lighting.Brightness = savedLighting.brightness
         Lighting.ClockTime = savedLighting.clock
     end
+    if savedLighting.fog then
+        Lighting.FogStart = savedLighting.fog[1]
+        Lighting.FogEnd = savedLighting.fog[2]
+    end
     pcall(function() Window.ScreenGui:Destroy() end)
     if getgenv then getgenv().SnowHoodLoaded = nil end
     print("[snow] unloaded")
 end
 
-AboutGroup:AddButton("Unload Script", Unload)
 getgenv().SnowHoodLoaded = { Unload = Unload }
 
 --=====================================================================
 -- STARTUP
 --=====================================================================
+state.hitSoundId = HIT_SOUNDS["Sword Slash"]
+
 task.spawn(function()
     local tries = 0
     while not GunHandler and tries < 40 do
@@ -3535,11 +5141,14 @@ task.spawn(function()
         tries = tries + 1
     end
     if GunHandler then installAll() else warn("[snow] GunHandler never loaded") end
-
-    -- Zee Hood utilizes ReplicatedStorage.Modules.GunHandler directly.
-    -- Namecall Ray hooks are disabled to guarantee complete client stability and prevent crash/desync.
-    -- All silent aim, bullet redirect, and pellet condensation are executed inside GunHandler.Shoot.
     pcall(loadConfig)
 end)
 
-print("[snow] loaded | GunHandler:", GunHandler and "hooked" or "missing")
+-- The shield toggle starts checked but its callback never runs on build, so it
+-- has to be armed here rather than waiting for a user interaction.
+task.spawn(function()
+    task.wait(3)
+    if Shield.on and not state.unloaded then armShield() end
+end)
+
+print("[snow] loaded | GunHandler:", GunHandler and "hooked" or "missing", "| remote:", getRemoteEvent() and "found" or "missing")
