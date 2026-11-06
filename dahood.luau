@@ -3198,11 +3198,14 @@ local function fireRemoteShot()
     if not state.silent or state.wallbangMode ~= "Remote" then return end
     local remote = getRemoteEvent()
     if not remote then return end
-    if os.clock() - rem.at < 0.05 then return end
-
     local tool = toolEquipped()
     local handle = tool and tool:FindFirstChild("Handle")
     if not handle then return end
+
+    -- Match the gun's own limits so the server never sees a shot the gun could not fire
+    if os.clock() - rem.at < math.max(numOn("ShootingCooldown", 0.1), 0.05) then return end
+    if numOn("Ammo", 1) < 1 then return end
+    if _G.GUN_COMBAT_TOGGLE then return end
 
     local part, pos = currentSilent()
     if not part or not pos then return end
